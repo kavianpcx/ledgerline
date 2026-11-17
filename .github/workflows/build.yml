@@ -104,6 +104,23 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $languages -notmatch 'eng' -or $languages -notmatch 'fas') {
             throw 'Bundled OCR engine is missing English or Persian language data.'
           }
+          Add-Type -AssemblyName System.Drawing
+          $samplePath = Join-Path $env:RUNNER_TEMP 'ledgerline-ocr-smoke.png'
+          $bitmap = [System.Drawing.Bitmap]::new(1500, 220)
+          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+          $graphics.Clear([System.Drawing.Color]::White)
+          $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAlias
+          $font = [System.Drawing.Font]::new('Arial', 54, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+          $graphics.DrawString('INVOICE TOTAL 12345', $font, [System.Drawing.Brushes]::Black, 25, 65)
+          $bitmap.Save($samplePath, [System.Drawing.Imaging.ImageFormat]::Png)
+          $graphics.Dispose()
+          $font.Dispose()
+          $bitmap.Dispose()
+          $recognized = (& (Join-Path $ocrDirectory 'tesseract.exe') $samplePath stdout --tessdata-dir $tessdataDirectory -l eng --psm 6 2>&1) -join [Environment]::NewLine
+          if ($LASTEXITCODE -ne 0 -or $recognized -notmatch 'INVOICE' -or $recognized -notmatch '12345') {
+            throw ('Offline OCR smoke test did not recognize the sample receipt. Output: ' + $recognized)
+          }
+          Write-Host ('Offline OCR smoke test recognized: ' + $recognized)
       - name: Set installer version
         shell: pwsh
         run: Set-Content -Path installer/app_version.iss -Value ('#define AppVersion "' + $env:APP_VERSION + '"') -Encoding ascii

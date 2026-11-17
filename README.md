@@ -25,14 +25,14 @@ flutter pub get
 flutter analyze
 flutter test --reporter expanded
 flutter run -d windows
-flutter build windows --release --dart-define=APP_VERSION=0.2.0
+flutter build windows --release --dart-define=APP_VERSION=0.2.1
 ```
 
 GitHub Actions runs analysis and tests on Ubuntu and builds the Windows release on `windows-latest`. The Windows job bundles Tesseract, pinned English/Persian models, their license files, and the installer. This repository intentionally does not build Android.
 
 ## Offline Smart Import OCR
 
-Choose an image in Smart Import and Ledgerline runs the bundled Tesseract engine locally with English and Persian language data. It displays editable recognized text. Nothing is posted to the ledger until you review and import it. OCR requires no network connection after installation.
+Choose an image in Smart Import and Ledgerline runs the bundled Tesseract engine locally with English and Persian language data. It displays editable recognized text. Nothing is posted to the ledger until you review and import it. OCR requires no network connection after installation. The Windows release workflow also runs a recognition smoke test against a generated sample receipt.
 
 ## Local data and privacy
 
