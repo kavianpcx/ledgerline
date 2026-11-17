@@ -1445,8 +1445,16 @@ class _MetricCard extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.all(17),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Text(label, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600)),
+              Row(children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Container(width: 34, height: 34, decoration: BoxDecoration(color: tint, borderRadius: BorderRadius.circular(11)), child: Icon(icon, color: const Color(0xFF087E78), size: 18)),
               ]),
               const SizedBox(height: 13),
