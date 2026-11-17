@@ -1,5 +1,4 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../data/ledger_repository.dart';
 import '../domain/app_settings.dart';
@@ -53,11 +52,7 @@ class _LedgerAppState extends State<LedgerApp> {
       debugShowCheckedModeBanner: false,
       locale: Locale(_settings.languageCode),
       supportedLocales: const [Locale('en'), Locale('fa')],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       themeMode: _settings.darkMode ? ThemeMode.dark : ThemeMode.light,
       theme: ThemeData(
         useMaterial3: true,

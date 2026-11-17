@@ -1,5 +1,5 @@
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_ocr_native/flutter_ocr_native.dart';
 
 import '../data/ledger_repository.dart';
@@ -206,7 +206,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                 ),
                 const SizedBox(width: 11),
                 Text(tr(context, 'appName'),
-                    style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.4)),
+                    style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.4)),
               ],
             ),
             actions: [
@@ -303,7 +303,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     };
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: EdgeInsets.fromLTRB(20, 18, 20, 36),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 36),
       children: [Center(child: ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth), child: content))],
     );
   }
