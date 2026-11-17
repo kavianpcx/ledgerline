@@ -17,7 +17,12 @@ void main() {
       repository: repository,
       initialSettings: AppSettings.defaults,
     ));
-    await tester.pumpAndSettle();
+    // Poll the loaded state for a bounded period instead of pumpAndSettle,
+    // which can wait forever on desktop navigation animations.
+    for (var attempt = 0; attempt < 40; attempt++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (find.text('Your books, at a glance').evaluate().isNotEmpty) break;
+    }
 
     expect(find.text('Your books, at a glance'), findsOneWidget);
     expect(find.text('Total assets'), findsOneWidget);
