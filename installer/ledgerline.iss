@@ -1,5 +1,5 @@
 #define AppName "Ledgerline"
-#define AppVersion "0.1.0"
+#include "app_version.iss"
 
 [Setup]
 AppId={{D27D10AE-ADE0-46B9-9F9F-88C502B60BA1}

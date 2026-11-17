@@ -36,6 +36,7 @@ jobs:
           - test/accounting_engine_test.dart
           - test/ledger_repository_test.dart
           - test/widget_test.dart
+          - test/update_service_test.dart
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -49,6 +50,7 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -59,10 +61,52 @@ jobs:
         run: flutter create --platforms=windows --project-name=ledgerline --org=com.ledgerline .
       - name: Resolve dependencies
         run: flutter pub get
+      - name: Install Tesseract runtime
+        shell: pwsh
+        run: choco install tesseract --yes --no-progress
+      - name: Read application version
+        shell: pwsh
+        run: |
+          $versionLine = (Select-String -Path pubspec.yaml -Pattern '^version:').Line
+          $appVersion = $versionLine.Split(':', 2)[1].Trim().Split('+')[0]
+          "APP_VERSION=$appVersion" >> $env:GITHUB_ENV
       - name: Build Windows release
-        env:
-          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
-        run: flutter build windows --release
+        shell: pwsh
+        run: flutter build windows --release --dart-define=APP_VERSION=$env:APP_VERSION
+      - name: Bundle English and Persian OCR models
+        shell: pwsh
+        run: |
+          $programFiles = [Environment]::GetEnvironmentVariable('ProgramFiles')
+          $programFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+          $candidates = @(
+            (Join-Path (Join-Path $programFiles 'Tesseract-OCR') 'tesseract.exe'),
+            (Join-Path (Join-Path $programFilesX86 'Tesseract-OCR') 'tesseract.exe'),
+            (Join-Path $env:ChocolateyInstall 'lib/tesseract/tools/tesseract.exe')
+          )
+          $sourceExe = $candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+          if (-not $sourceExe) { $sourceExe = (Get-Command tesseract.exe -ErrorAction SilentlyContinue).Source }
+          if (-not $sourceExe) { throw 'Tesseract installation did not provide tesseract.exe.' }
+          $sourceDirectory = Split-Path -Parent $sourceExe
+          $releaseDirectory = Join-Path $PWD 'build/windows/x64/runner/Release'
+          $ocrDirectory = Join-Path $releaseDirectory 'ocr'
+          $tessdataDirectory = Join-Path $ocrDirectory 'tessdata'
+          New-Item -ItemType Directory -Force -Path $ocrDirectory, $tessdataDirectory | Out-Null
+          Copy-Item -LiteralPath $sourceExe -Destination $ocrDirectory -Force
+          Get-ChildItem -LiteralPath $sourceDirectory -Filter '*.dll' -File | Copy-Item -Destination $ocrDirectory -Force
+          $modelRevision = '87416418657359cb625c412a48b6e1d6d41c29bd'
+          $modelBase = 'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/' + $modelRevision
+          foreach ($language in @('eng', 'fas')) {
+            Invoke-WebRequest -Uri ($modelBase + '/' + $language + '.traineddata') -OutFile (Join-Path $tessdataDirectory ($language + '.traineddata'))
+          }
+          Invoke-WebRequest -Uri ($modelBase + '/LICENSE') -OutFile (Join-Path $ocrDirectory 'TESSDATA-LICENSE.txt')
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/tesseract-ocr/tesseract/main/LICENSE' -OutFile (Join-Path $ocrDirectory 'TESSERACT-LICENSE.txt')
+          $languages = (& (Join-Path $ocrDirectory 'tesseract.exe') --tessdata-dir $tessdataDirectory --list-langs 2>&1) -join [Environment]::NewLine
+          if ($LASTEXITCODE -ne 0 -or $languages -notmatch 'eng' -or $languages -notmatch 'fas') {
+            throw 'Bundled OCR engine is missing English or Persian language data.'
+          }
+      - name: Set installer version
+        shell: pwsh
+        run: Set-Content -Path installer/app_version.iss -Value ('#define AppVersion "' + $env:APP_VERSION + '"') -Encoding ascii
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress
@@ -82,12 +126,20 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+      - name: Read release tag
+        id: version
+        shell: bash
+        run: |
+          version="$(sed -n 's/^version: //p' pubspec.yaml | head -n1 | cut -d+ -f1)"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
         with:
           name: ledgerline-windows-installer
           path: release-assets
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.1.0
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
           files: release-assets/ledgerline-windows-setup.exe
           generate_release_notes: true

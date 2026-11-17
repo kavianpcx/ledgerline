@@ -1,14 +1,21 @@
-import 'package:file_picker/file_picker.dart';
-import 'package:material_ui/material_ui.dart';
-import 'package:flutter_ocr_native/flutter_ocr_native.dart';
+import 'dart:async';
+import 'dart:io' as io;
 
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
+import 'package:material_ui/material_ui.dart';
+
+import '../config/app_version.dart';
 import '../data/ledger_repository.dart';
+
 import '../domain/account.dart';
 import '../domain/app_settings.dart';
 import '../domain/accounting_engine.dart';
 import '../domain/ledger_entry.dart';
 import '../domain/product.dart';
 import '../domain/sales_invoice.dart';
+import '../services/offline_ocr_service.dart';
+import '../services/update_service.dart';
 import 'app_strings.dart';
 
 class LedgerHomePage extends StatefulWidget {
@@ -31,6 +38,12 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   int _selectedIndex = 0;
   late Future<LedgerSnapshot> _snapshot;
   late final TextEditingController _businessNameController;
+  late final UpdateService _updateService;
+  bool _checkingUpdates = false;
+  bool _downloadingUpdate = false;
+  bool _updateChecked = false;
+  bool _updateCheckFailed = false;
+  UpdateInfo? _availableUpdate;
 
   static const _destinations = <(String, IconData, IconData)>[
     ('overview', Icons.grid_view_rounded, Icons.grid_view_outlined),
@@ -49,12 +62,97 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     super.initState();
     _snapshot = widget.repository.loadSnapshot();
     _businessNameController = TextEditingController(text: widget.settings.businessName);
+    _updateService = const UpdateService();
+    if (kReleaseMode) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_checkForUpdates(silent: true));
+      });
+    }
   }
 
   @override
   void dispose() {
     _businessNameController.dispose();
     super.dispose();
+  }
+
+
+  String _updateStatus() {
+    if (_checkingUpdates) return 'Checking GitHub Releases…';
+    if (_downloadingUpdate) return 'Downloading and verifying installer…';
+    final update = _availableUpdate;
+    if (update != null) return 'Version ' + update.version + ' is ready.';
+    if (_updateChecked && !_updateCheckFailed) return 'You are using the latest release.';
+    if (_updateCheckFailed) return 'Could not check GitHub Releases. Check your connection and retry.';
+    return 'Current version: ' + appVersion;
+  }
+
+  Future<void> _checkForUpdates({bool silent = false}) async {
+    if (_checkingUpdates) return;
+    setState(() {
+      _checkingUpdates = true;
+      _updateCheckFailed = false;
+    });
+    try {
+      final update = await _updateService.checkForUpdate(currentVersion: appVersion);
+      if (!mounted) return;
+      setState(() {
+        _availableUpdate = update;
+        _updateChecked = true;
+      });
+      if (!silent) {
+        _notify(update == null ? 'Ledgerline is up to date.' : 'Version ' + update.version + ' is available.');
+      }
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _availableUpdate = null;
+        _updateChecked = true;
+        _updateCheckFailed = true;
+      });
+      if (!silent) _notify('Could not check for updates. Check your internet connection and retry.');
+    } finally {
+      if (mounted) setState(() => _checkingUpdates = false);
+    }
+  }
+
+  Future<void> _downloadAndInstallUpdate() async {
+    final update = _availableUpdate;
+    if (update == null || _downloadingUpdate) return;
+    setState(() => _downloadingUpdate = true);
+    try {
+      final installer = await _updateService.downloadAndVerify(update);
+      if (!mounted) return;
+      final approved = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Ledgerline ' + update.version + ' is ready'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('The installer SHA-256 matches the digest published by GitHub. Review it below before opening the installer.'),
+              const SizedBox(height: 12),
+              SelectableText('SHA-256: ' + update.sha256, style: Theme.of(dialogContext).textTheme.bodySmall),
+              const SizedBox(height: 12),
+              const Text('This release is not Authenticode-signed, so Windows cannot verify a publisher identity.'),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Later')),
+            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Open installer')),
+          ],
+        ),
+      );
+      if (approved == true) {
+        await io.Process.start(installer.path, const [], mode: io.ProcessStartMode.detached);
+        io.exit(0);
+      }
+    } on Object catch (error) {
+      if (mounted) _notify('Could not install update: $error');
+    } finally {
+      if (mounted) setState(() => _downloadingUpdate = false);
+    }
   }
 
   Future<void> _reload() async {
@@ -484,11 +582,33 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
           ),
           const SizedBox(height: 14),
           Card(
-            child: ListTile(
-              leading: const Icon(Icons.system_update_alt_rounded),
-              title: Text(tr(context, 'updates'), style: const TextStyle(fontWeight: FontWeight.w800)),
-              subtitle: Text(tr(context, 'updateInfo')),
-            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              ListTile(
+                leading: const Icon(Icons.system_update_alt_rounded),
+                title: Text(tr(context, 'updates'), style: const TextStyle(fontWeight: FontWeight.w800)),
+                subtitle: Text(_updateStatus()),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Wrap(spacing: 10, runSpacing: 8, children: [
+                  OutlinedButton.icon(
+                    onPressed: _checkingUpdates || _downloadingUpdate ? null : () => _checkForUpdates(),
+                    icon: _checkingUpdates
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.refresh_rounded),
+                    label: const Text('Check for updates'),
+                  ),
+                  if (_availableUpdate != null)
+                    FilledButton.icon(
+                      onPressed: _downloadingUpdate ? null : _downloadAndInstallUpdate,
+                      icon: _downloadingUpdate
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.download_rounded),
+                      label: Text(_downloadingUpdate ? 'Verifying installer…' : 'Download and install'),
+                    ),
+                ]),
+              ),
+            ]),
           ),
         ],
       );
@@ -544,6 +664,17 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         const SizedBox(height: 6),
         Text(tr(context, 'overviewSubtitle'),
             style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 15)),
+        if (_availableUpdate != null) ...[
+          const SizedBox(height: 14),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.system_update_alt_rounded),
+              title: Text('Ledgerline ' + _availableUpdate!.version + ' is available'),
+              subtitle: const Text('Review the installer digest before opening the update.'),
+              trailing: FilledButton(onPressed: _downloadAndInstallUpdate, child: const Text('Update')),
+            ),
+          ),
+        ],
         const SizedBox(height: 24),
         _WelcomeCard(
           entryCount: snapshot.entries.length,
@@ -1217,18 +1348,16 @@ class _SmartImportPanelState extends State<_SmartImportPanel> {
       _ocrBusy = true;
       _error = null;
     });
-    final reader = OcrReader();
     try {
-      final result = await reader.readFromPath(imagePath);
+      final text = await const OfflineOcrService().recognizeImage(imagePath);
       if (!mounted) return;
       setState(() {
-        _recognizedText.text = result.text;
-        if (result.text.trim().isEmpty) _error = tr(context, 'ocrEmpty');
+        _recognizedText.text = text;
+        if (text.trim().isEmpty) _error = tr(context, 'ocrEmpty');
       });
     } on Object catch (error) {
       if (mounted) setState(() => _error = '${tr(context, 'ocrFailed')}: $error');
     } finally {
-      await reader.dispose();
       if (mounted) setState(() => _ocrBusy = false);
     }
   }

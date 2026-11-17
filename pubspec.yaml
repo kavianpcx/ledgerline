@@ -1,7 +1,7 @@
 name: ledgerline
 description: Offline-first double-entry accounting for Windows.
 publish_to: "none"
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ">=3.10.0 <4.0.0"
@@ -11,7 +11,7 @@ dependencies:
     sdk: flutter
   material_ui: ^1.11.1
   file_picker: ^10.3.7
-  flutter_ocr_native: ^0.3.8
+  crypto: ^3.0.8
   path: ^1.9.1
   path_provider: ^2.1.6
   sqflite_common_ffi: ^2.4.7
