@@ -1,0 +1,19 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+coverage/
+installer/output/
+
+# Local IDE and platform configuration
+.idea/
+.vscode/
+*.iml
+android/local.properties
+
+# Local SQLite data
+*.db
+*.db-shm
+*.db-wal

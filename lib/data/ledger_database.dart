@@ -1,0 +1,138 @@
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+class LedgerDatabase {
+  LedgerDatabase._(this._database, this.path);
+
+  final Database _database;
+  final String path;
+
+  Database get handle => _database;
+
+  static Future<LedgerDatabase> open(String path) async {
+    final database = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 2,
+        onConfigure: (db) async {
+          await db.execute('PRAGMA foreign_keys = ON');
+        },
+        onCreate: _createSchema,
+        onUpgrade: _upgradeSchema,
+      ),
+    );
+    return LedgerDatabase._(database, path);
+  }
+
+  static Future<LedgerDatabase> openInMemory() async {
+    sqfliteFfiInit();
+    final database = await databaseFactoryFfi.openDatabase(
+      inMemoryDatabasePath,
+      options: OpenDatabaseOptions(
+        version: 2,
+        onConfigure: (db) async {
+          await db.execute('PRAGMA foreign_keys = ON');
+        },
+        onCreate: _createSchema,
+      ),
+    );
+    return LedgerDatabase._(database, inMemoryDatabasePath);
+  }
+
+  Future<void> close() => _database.close();
+
+  static Future<void> _createSchema(Database db, int version) async {
+    await db.execute('''
+      CREATE TABLE accounts (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('asset', 'liability', 'equity', 'income', 'expense')),
+        is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE journal_entries (
+        id TEXT PRIMARY KEY,
+        entry_date TEXT NOT NULL,
+        description TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE journal_lines (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_id TEXT NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+        account_id TEXT NOT NULL REFERENCES accounts(id),
+        debit_cents INTEGER NOT NULL DEFAULT 0 CHECK (debit_cents >= 0),
+        credit_cents INTEGER NOT NULL DEFAULT 0 CHECK (credit_cents >= 0),
+        CHECK ((debit_cents > 0 AND credit_cents = 0) OR
+               (credit_cents > 0 AND debit_cents = 0))
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX journal_entries_by_date ON journal_entries(entry_date DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX journal_lines_by_account ON journal_lines(account_id)',
+    );
+    await _createProductInvoiceAndSettingsTables(db);
+  }
+
+  static Future<void> _upgradeSchema(
+    Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    if (oldVersion < 2) {
+      await _createProductInvoiceAndSettingsTables(db);
+    }
+  }
+
+  static Future<void> _createProductInvoiceAndSettingsTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE products (
+        id TEXT PRIMARY KEY,
+        sku TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        unit_price_cents INTEGER NOT NULL CHECK (unit_price_cents >= 0),
+        unit_cost_cents INTEGER NOT NULL DEFAULT 0 CHECK (unit_cost_cents >= 0),
+        stock_quantity INTEGER NOT NULL DEFAULT 0 CHECK (stock_quantity >= 0),
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE sales_invoices (
+        id TEXT PRIMARY KEY,
+        invoice_number TEXT NOT NULL UNIQUE,
+        customer_name TEXT NOT NULL,
+        issue_date TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('issued', 'paid', 'void')),
+        subtotal_cents INTEGER NOT NULL CHECK (subtotal_cents >= 0),
+        tax_cents INTEGER NOT NULL CHECK (tax_cents >= 0),
+        total_cents INTEGER NOT NULL CHECK (total_cents >= 0),
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE invoice_lines (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_id TEXT NOT NULL REFERENCES sales_invoices(id) ON DELETE CASCADE,
+        product_id TEXT REFERENCES products(id) ON DELETE SET NULL,
+        description TEXT NOT NULL,
+        quantity INTEGER NOT NULL CHECK (quantity > 0),
+        unit_price_cents INTEGER NOT NULL CHECK (unit_price_cents >= 0),
+        unit_cost_cents INTEGER NOT NULL CHECK (unit_cost_cents >= 0),
+        line_total_cents INTEGER NOT NULL CHECK (line_total_cents >= 0)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE app_settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX invoices_by_date ON sales_invoices(issue_date DESC)',
+    );
+  }
+}
