@@ -11,6 +11,22 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve dependencies
+        run: flutter pub get
+      - name: Analyze
+        run: flutter analyze
+      - name: Test
+        run: flutter test --reporter expanded --timeout 120s
+
   windows:
     runs-on: windows-latest
     steps:
@@ -23,10 +39,6 @@ jobs:
         run: flutter create --platforms=windows --project-name=ledgerline --org=com.ledgerline .
       - name: Resolve dependencies
         run: flutter pub get
-      - name: Analyze
-        run: flutter analyze
-      - name: Test
-        run: flutter test --reporter expanded
       - name: Build Windows release
         run: flutter build windows --release
       - name: Install Inno Setup
@@ -43,7 +55,7 @@ jobs:
 
   publish-release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release]')
-    needs: [windows]
+    needs: [test, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
