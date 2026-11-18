@@ -573,6 +573,9 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
       }
 
       final total = _cartTotal;
+      // The modal review step blocks the page below it. Stop animating a
+      // checkout spinner behind the dialog while the cashier makes a choice.
+      setState(() => _checkingOut = false);
       final request = await showDialog<_PosCheckoutRequest>(
         context: context,
         builder: (context) => _PosCheckoutDialog(
@@ -581,6 +584,7 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
         ),
       );
       if (request == null || !mounted || _cart.isEmpty) return;
+      setState(() => _checkingOut = true);
 
       await widget.repository.createInvoice(
         InvoiceDraft(
