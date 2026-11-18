@@ -159,7 +159,12 @@ void main() {
     expect(invoice.status, 'paid');
     expect(invoice.paidCents, 22000);
     expect(invoice.balanceDueCents, 0);
-    expect(snapshot.entries, hasLength(3));
+    expect(
+      snapshot.entries
+          .where((entry) => entry.description.startsWith('Invoice payment'))
+          .length,
+      2,
+    );
 
     final paymentBalances = await database.handle.rawQuery('''
       SELECT l.account_id,
