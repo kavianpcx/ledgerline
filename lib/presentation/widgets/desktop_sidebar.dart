@@ -265,45 +265,54 @@ class _LedgerDesktopSidebarState extends State<LedgerDesktopSidebar> {
             final matches = widget.destinations.asMap().entries.where((entry) {
               return tr(context, entry.value.$1).toLowerCase().contains(query);
             }).toList(growable: false);
-            return AlertDialog(
-              title: Text(tr(context, 'searchNavigation')),
-              content: SizedBox(
+            return Dialog(
+              child: SizedBox(
                 width: 420,
-                height: 360,
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: controller,
-                      autofocus: true,
-                      onChanged: (_) => setDialogState(() {}),
-                      decoration: InputDecoration(
-                        hintText: tr(context, 'searchNavigation'),
-                        prefixIcon: const Icon(Icons.search_rounded),
+                height: 420,
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        tr(context, 'searchNavigation'),
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Expanded(
-                      child: matches.isEmpty
-                          ? Center(child: Text(tr(context, 'noNavigationResults')))
-                          : ListView.builder(
-                              itemCount: matches.length,
-                              itemBuilder: (context, index) {
-                                final entry = matches[index];
-                                return ListTile(
-                                  key: Key('desktop-navigation-search-result-${entry.key}'),
-                                  leading: Icon(entry.value.$3),
-                                  title: Text(tr(context, entry.value.$1)),
-                                  onTap: () {
-                                    widget.onDestinationSelected(entry.key);
-                                    Navigator.pop(dialogContext);
-                                  },
-                                );
-                              },
-                            ),
-                    ),
-                  ],
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: controller,
+                        autofocus: true,
+                        onChanged: (_) => setDialogState(() {}),
+                        decoration: InputDecoration(
+                          hintText: tr(context, 'searchNavigation'),
+                          prefixIcon: const Icon(Icons.search_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: matches.isEmpty
+                            ? Center(child: Text(tr(context, 'noNavigationResults')))
+                            : ListView.builder(
+                                itemCount: matches.length,
+                                itemBuilder: (context, index) {
+                                  final entry = matches[index];
+                                  return ListTile(
+                                    key: Key('desktop-navigation-search-result-${entry.key}'),
+                                    leading: Icon(entry.value.$3),
+                                    title: Text(tr(context, entry.value.$1)),
+                                    onTap: () {
+                                      widget.onDestinationSelected(entry.key);
+                                      Navigator.pop(dialogContext);
+                                    },
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
+            );
             );
           },
         ),
