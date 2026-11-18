@@ -4,6 +4,7 @@ import 'dart:io' as io;
 import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../config/app_version.dart';
 import '../data/ledger_repository.dart';
@@ -16,6 +17,7 @@ import '../domain/sales_invoice.dart';
 import '../services/offline_ocr_service.dart';
 import '../services/update_service.dart';
 import 'app_strings.dart';
+import 'widgets/searchable_select.dart';
 
 class LedgerHomePage extends StatefulWidget {
   const LedgerHomePage({
@@ -366,50 +368,118 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
           4 => 2,
           _ => 3,
         };
-        return Scaffold(
-          appBar: AppBar(
-            titleSpacing: isWide ? 32 : 20,
-            title: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE0F2EE),
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  child: const Icon(Icons.account_balance_wallet_rounded,
-                      color: Color(0xFF087E78), size: 19),
-                ),
-                const SizedBox(width: 11),
-                Text(tr(context, 'appName'),
-                    style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.4)),
-              ],
-            ),
-            actions: [
-              if (_selectedIndex == 0 || _selectedIndex == 1)
-                FutureBuilder<LedgerSnapshot>(
-                  future: _snapshot,
-                  builder: (context, result) => Padding(
-                    padding: const EdgeInsets.only(right: 18),
-                    child: FilledButton.icon(
-                      onPressed: result.data == null ? null : () => _addEntry(result.data!),
-                      icon: const Icon(Icons.add_rounded, size: 19),
-                      label: Text(isCompact ? tr(context, 'add') : tr(context, 'newEntry')),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF087E78),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        final scaffold = Scaffold(
+          appBar: io.Platform.isWindows
+              ? PreferredSize(
+                  preferredSize: const Size.fromHeight(56),
+                  child: Material(
+                    color: Theme.of(context).scaffoldBackgroundColor,
+                    child: WindowCaption(
+                      brightness: Theme.of(context).brightness,
+                      title: SizedBox(
+                        height: 56,
+                        child: Row(
+                          children: [
+                            const SizedBox(width: 14),
+                            Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE0F2EE),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.account_balance_wallet_rounded,
+                                  color: Color(0xFF087E78), size: 18),
+                            ),
+                            const SizedBox(width: 9),
+                            Text(tr(context, 'appName'),
+                                style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                            const SizedBox(width: 18),
+                            for (var index = 0; index < _destinations.length; index++)
+                              Tooltip(
+                                message: tr(context, _destinations[index].$1),
+                                child: IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  constraints: const BoxConstraints.tightFor(width: 38, height: 38),
+                                  padding: EdgeInsets.zero,
+                                  onPressed: () => setState(() => _selectedIndex = index),
+                                  style: IconButton.styleFrom(
+                                    foregroundColor: _selectedIndex == index
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                                    backgroundColor: _selectedIndex == index
+                                        ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.65)
+                                        : Colors.transparent,
+                                  ),
+                                  icon: Icon(_selectedIndex == index
+                                      ? _destinations[index].$2
+                                      : _destinations[index].$3, size: 19),
+                                ),
+                              ),
+                            const Spacer(),
+                            if (_selectedIndex == 0 || _selectedIndex == 1)
+                              FutureBuilder<LedgerSnapshot>(
+                                future: _snapshot,
+                                builder: (context, result) => IconButton.filled(
+                                  tooltip: tr(context, 'newEntry'),
+                                  onPressed: result.data == null ? null : () => _addEntry(result.data!),
+                                  icon: const Icon(Icons.add_rounded, size: 19),
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: const Color(0xFF087E78),
+                                    foregroundColor: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(width: 8),
+                          ],
+                        ),
                       ),
                     ),
                   ),
+                )
+              : AppBar(
+                  titleSpacing: isWide ? 32 : 20,
+                  title: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE0F2EE),
+                          borderRadius: BorderRadius.circular(11),
+                        ),
+                        child: const Icon(Icons.account_balance_wallet_rounded,
+                            color: Color(0xFF087E78), size: 19),
+                      ),
+                      const SizedBox(width: 11),
+                      Text(tr(context, 'appName'),
+                          style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.4)),
+                    ],
+                  ),
+                  actions: [
+                    if (_selectedIndex == 0 || _selectedIndex == 1)
+                      FutureBuilder<LedgerSnapshot>(
+                        future: _snapshot,
+                        builder: (context, result) => Padding(
+                          padding: const EdgeInsets.only(right: 18),
+                          child: FilledButton.icon(
+                            onPressed: result.data == null ? null : () => _addEntry(result.data!),
+                            icon: const Icon(Icons.add_rounded, size: 19),
+                            label: Text(isCompact ? tr(context, 'add') : tr(context, 'newEntry')),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF087E78),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-            ],
-          ),
           body: Row(
             children: [
-              if (isWide)
+              if (isWide && !io.Platform.isWindows)
                 NavigationRail(
                   selectedIndex: _selectedIndex,
                   onDestinationSelected: (index) => setState(() => _selectedIndex = index),
@@ -461,6 +531,23 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                       ),
                   ],
                 ),
+        );
+        if (!io.Platform.isWindows) return scaffold;
+        return CallbackShortcuts(
+          bindings: <ShortcutActivator, VoidCallback>{
+            const SingleActivator(LogicalKeyboardKey.keyM, control: true, shift: true):
+                () => WindowManager.instance.getCurrent()?.minimize(),
+            const SingleActivator(LogicalKeyboardKey.keyF, control: true, shift: true): () {
+              final window = WindowManager.instance.getCurrent();
+              if (window == null) return;
+              if (window.isMaximized) {
+                window.unmaximize();
+              } else {
+                window.maximize();
+              }
+            },
+          },
+          child: DragToResizeArea(child: scaffold),
         );
       },
     );
@@ -605,16 +692,19 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                     onSubmitted: (_) => _saveBusinessName(),
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: widget.settings.currencyCode,
-                    decoration: InputDecoration(labelText: tr(context, 'currency')),
-                    items: const [
-                      DropdownMenuItem(value: 'USD', child: Text('USD · US Dollar')),
-                      DropdownMenuItem(value: 'EUR', child: Text('EUR · Euro')),
-                      DropdownMenuItem(value: 'GBP', child: Text('GBP · Pound sterling')),
-                      DropdownMenuItem(value: 'CAD', child: Text('CAD · Canadian dollar')),
-                      DropdownMenuItem(value: 'AUD', child: Text('AUD · Australian dollar')),
-                      DropdownMenuItem(value: 'AED', child: Text('AED · UAE dirham')),
+                  SearchableSelect<String>(
+                    id: 'settings-currency',
+                    label: tr(context, 'currency'),
+                    searchHint: tr(context, 'searchCurrencies'),
+                    emptyLabel: tr(context, 'noSearchResults'),
+                    value: widget.settings.currencyCode,
+                    options: const [
+                      SearchableSelectOption(value: 'USD', label: 'USD · US Dollar'),
+                      SearchableSelectOption(value: 'EUR', label: 'EUR · Euro'),
+                      SearchableSelectOption(value: 'GBP', label: 'GBP · Pound sterling'),
+                      SearchableSelectOption(value: 'CAD', label: 'CAD · Canadian dollar'),
+                      SearchableSelectOption(value: 'AUD', label: 'AUD · Australian dollar'),
+                      SearchableSelectOption(value: 'AED', label: 'AED · UAE dirham'),
                     ],
                     onChanged: (value) {
                       if (value != null) {
@@ -650,12 +740,15 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(tr(context, 'language'), style: const TextStyle(fontWeight: FontWeight.w700)),
                   const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    initialValue: widget.settings.languageCode,
-                    decoration: InputDecoration(hintText: tr(context, 'language')),
-                    items: [
-                      DropdownMenuItem(value: 'en', child: Text(tr(context, 'english'))),
-                      DropdownMenuItem(value: 'fa', child: Text(tr(context, 'persian'))),
+                  SearchableSelect<String>(
+                    id: 'settings-language',
+                    label: tr(context, 'language'),
+                    searchHint: tr(context, 'searchLanguages'),
+                    emptyLabel: tr(context, 'noSearchResults'),
+                    value: widget.settings.languageCode,
+                    options: [
+                      SearchableSelectOption(value: 'en', label: tr(context, 'english')),
+                      SearchableSelectOption(value: 'fa', label: tr(context, 'persian')),
                     ],
                     onChanged: (value) {
                       if (value != null) {
@@ -945,18 +1038,24 @@ class _AccountDialogState extends State<_AccountDialog> {
                 validator: (value) => value == null || value.trim().isEmpty ? 'Required.' : null,
               ),
               const SizedBox(height: 12),
-              DropdownButtonFormField<AccountType>(
-                initialValue: _type,
-                decoration: InputDecoration(labelText: tr(context, 'selectAccountType')),
-                items: [
+              SearchableSelect<AccountType>(
+                id: 'new-account-type',
+                label: tr(context, 'selectAccountType'),
+                searchHint: tr(context, 'searchAccounts'),
+                emptyLabel: tr(context, 'noSearchResults'),
+                value: _type,
+                options: [
                   for (final type in AccountType.values)
-                    DropdownMenuItem(value: type, child: Text(tr(context, switch (type) {
-                      AccountType.asset => 'asset',
-                      AccountType.liability => 'liability',
-                      AccountType.equity => 'equity',
-                      AccountType.income => 'incomeType',
-                      AccountType.expense => 'expense',
-                    }))),
+                    SearchableSelectOption(
+                      value: type,
+                      label: tr(context, switch (type) {
+                        AccountType.asset => 'asset',
+                        AccountType.liability => 'liability',
+                        AccountType.equity => 'equity',
+                        AccountType.income => 'incomeType',
+                        AccountType.expense => 'expense',
+                      }),
+                    ),
                 ],
                 onChanged: (value) {
                   if (value != null) setState(() => _type = value);
@@ -1038,17 +1137,37 @@ class _EntryDialogState extends State<_EntryDialog> {
                     },
                   ),
                   const SizedBox(height: 14),
-                  DropdownButtonFormField<String>(
-                    initialValue: _debitId,
-                    decoration: InputDecoration(labelText: tr(context, 'debitAccount')),
-                    items: [for (final account in widget.accounts) DropdownMenuItem(value: account.id, child: Text('${account.code} · ${account.name}'))],
+                  SearchableSelect<String>(
+                    id: 'journal-debit-account',
+                    label: tr(context, 'debitAccount'),
+                    searchHint: tr(context, 'searchAccounts'),
+                    emptyLabel: tr(context, 'noSearchResults'),
+                    value: _debitId,
+                    options: [
+                      for (final account in widget.accounts)
+                        SearchableSelectOption(
+                          value: account.id,
+                          label: '${account.code} · ${account.name}',
+                          searchText: account.code,
+                        ),
+                    ],
                     onChanged: (value) => setState(() => _debitId = value),
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: _creditId,
-                    decoration: InputDecoration(labelText: tr(context, 'creditAccount')),
-                    items: [for (final account in widget.accounts) DropdownMenuItem(value: account.id, child: Text('${account.code} · ${account.name}'))],
+                  SearchableSelect<String>(
+                    id: 'journal-credit-account',
+                    label: tr(context, 'creditAccount'),
+                    searchHint: tr(context, 'searchAccounts'),
+                    emptyLabel: tr(context, 'noSearchResults'),
+                    value: _creditId,
+                    options: [
+                      for (final account in widget.accounts)
+                        SearchableSelectOption(
+                          value: account.id,
+                          label: '${account.code} · ${account.name}',
+                          searchText: account.code,
+                        ),
+                    ],
                     onChanged: (value) => setState(() => _creditId = value),
                   ),
                   const SizedBox(height: 12),
@@ -1267,12 +1386,19 @@ class _InvoiceDialogState extends State<_InvoiceDialog> {
       child: Row(children: [
         Expanded(
           flex: 3,
-          child: DropdownButtonFormField<String>(
-            initialValue: line.productId,
-            decoration: InputDecoration(labelText: tr(context, 'products')),
-            items: [
+          child: SearchableSelect<String>(
+            id: 'invoice-product-$index',
+            label: tr(context, 'products'),
+            searchHint: tr(context, 'searchProducts'),
+            emptyLabel: tr(context, 'noSearchResults'),
+            value: line.productId,
+            options: [
               for (final product in _availableProducts)
-                DropdownMenuItem(value: product.id, child: Text('${product.name} · ${_money(product.unitPriceCents, widget.currencyCode)}')),
+                SearchableSelectOption(
+                  value: product.id,
+                  label: '${product.name} · ${_money(product.unitPriceCents, widget.currencyCode)}',
+                  searchText: product.sku,
+                ),
             ],
             onChanged: (value) => setState(() => line.productId = value),
           ),

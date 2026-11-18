@@ -86,7 +86,12 @@ class _SearchableSelectState<T> extends State<SearchableSelect<T>> {
 
   @override
   void dispose() {
-    _closePopup();
+    final entry = _overlayEntry;
+    _overlayEntry = null;
+    if (entry != null) {
+      entry.remove();
+      entry.dispose();
+    }
     _searchFocus.dispose();
     _listScroll.dispose();
     super.dispose();
