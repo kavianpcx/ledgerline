@@ -560,10 +560,8 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                 ),
         );
         if (!io.Platform.isWindows) return scaffold;
-        return Focus(
-          autofocus: true,
-          child: CallbackShortcuts(
-            bindings: <ShortcutActivator, VoidCallback>{
+        return CallbackShortcuts(
+          bindings: <ShortcutActivator, VoidCallback>{
             const SingleActivator(LogicalKeyboardKey.keyM, control: true, shift: true):
                 () => WindowManager.instance.getCurrent()?.minimize(),
             const SingleActivator(LogicalKeyboardKey.keyF, control: true, shift: true): () {
@@ -576,6 +574,8 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
               }
             },
           },
+          child: Focus(
+            autofocus: true,
             child: DragToResizeArea(child: scaffold),
           ),
         );
