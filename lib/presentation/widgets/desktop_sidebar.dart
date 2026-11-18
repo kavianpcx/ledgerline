@@ -255,69 +255,96 @@ class _LedgerDesktopSidebarState extends State<LedgerDesktopSidebar> {
   }
 
   Future<void> _showSearchDialog() async {
-    final controller = TextEditingController();
-    try {
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => StatefulBuilder(
-          builder: (context, setDialogState) {
-            final query = controller.text.trim().toLowerCase();
-            final matches = widget.destinations.asMap().entries.where((entry) {
-              return tr(context, entry.value.$1).toLowerCase().contains(query);
-            }).toList(growable: false);
-            return Dialog(
-              child: SizedBox(
-                width: 420,
-                height: 420,
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        tr(context, 'searchNavigation'),
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        controller: controller,
-                        autofocus: true,
-                        onChanged: (_) => setDialogState(() {}),
-                        decoration: InputDecoration(
-                          hintText: tr(context, 'searchNavigation'),
-                          prefixIcon: const Icon(Icons.search_rounded),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Expanded(
-                        child: matches.isEmpty
-                            ? Center(child: Text(tr(context, 'noNavigationResults')))
-                            : ListView.builder(
-                                itemCount: matches.length,
-                                itemBuilder: (context, index) {
-                                  final entry = matches[index];
-                                  return ListTile(
-                                    key: Key('desktop-navigation-search-result-${entry.key}'),
-                                    leading: Icon(entry.value.$3),
-                                    title: Text(tr(context, entry.value.$1)),
-                                    onTap: () {
-                                      widget.onDestinationSelected(entry.key);
-                                      Navigator.pop(dialogContext);
-                                    },
-                                  );
-                                },
-                              ),
-                      ),
-                    ],
-                  ),
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _NavigationSearchDialog(
+        destinations: widget.destinations,
+        onDestinationSelected: widget.onDestinationSelected,
+      ),
+    );
+  }
+}
+
+class _NavigationSearchDialog extends StatefulWidget {
+  const _NavigationSearchDialog({
+    required this.destinations,
+    required this.onDestinationSelected,
+  });
+
+  final List<LedgerNavDestination> destinations;
+  final ValueChanged<int> onDestinationSelected;
+
+  @override
+  State<_NavigationSearchDialog> createState() => _NavigationSearchDialogState();
+}
+
+class _NavigationSearchDialogState extends State<_NavigationSearchDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _controller.text.trim().toLowerCase();
+    final matches = widget.destinations.asMap().entries.where((entry) {
+      return tr(context, entry.value.$1).toLowerCase().contains(query);
+    }).toList(growable: false);
+    final viewport = MediaQuery.sizeOf(context);
+    final width = viewport.width < 480 ? viewport.width - 40 : 420.0;
+    final height = viewport.height < 480 ? viewport.height - 40 : 420.0;
+
+    return Dialog(
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                tr(context, 'searchNavigation'),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                key: const Key('desktop-navigation-search-field'),
+                controller: _controller,
+                autofocus: true,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: tr(context, 'searchNavigation'),
+                  prefixIcon: const Icon(Icons.search_rounded),
                 ),
               ),
-            );
-          },
+              const SizedBox(height: 10),
+              Expanded(
+                child: matches.isEmpty
+                    ? Center(child: Text(tr(context, 'noNavigationResults')))
+                    : ListView.builder(
+                        itemCount: matches.length,
+                        itemBuilder: (context, index) {
+                          final entry = matches[index];
+                          return ListTile(
+                            key: Key('desktop-navigation-search-result-${entry.key}'),
+                            leading: Icon(entry.value.$3),
+                            title: Text(tr(context, entry.value.$1)),
+                            onTap: () {
+                              widget.onDestinationSelected(entry.key);
+                              Navigator.pop(context);
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
         ),
-      );
-    } finally {
-      controller.dispose();
-    }
+      ),
+    );
   }
 }
