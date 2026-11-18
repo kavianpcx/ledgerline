@@ -2,7 +2,7 @@
 
 ## Scope and evidence
 
-This review treats the latest GitHub source as authoritative. At the start of POS checkout work, `main` was `ab615a02f369155fbd5ad44ab170f0a3c7c4005a` after merges of PRs #2 through #5. Sidebar repair PR #2, currency-safety PR #3, product-catalog PR #4, and product CSV import PR #5 are merged. The successful post-PR5 Windows build and test workflow is [run 44371927172](https://github.com/kavianpcx/ledgerline/actions/runs/44371927172). It passed analysis, all eight test files, Windows packaging/smoke, and scripted evidence capture; its release-publish job was skipped because it was a PR run.
+This review treats the latest GitHub source as authoritative. At the start of POS checkout work, `main` was `ab615a02f369155fbd5ad44ab170f0a3c7c4005a` after merges of PRs #2 through #5. Sidebar repair PR #2, currency-safety PR #3, product-catalog PR #4, and product CSV import PR #5 are merged. The successful post-PR5 Windows build and test workflow is [run 44371927172](https://github.com/kavianpcx/ledgerline/actions/runs/44371927172). It passed analysis, all nine test files, Windows packaging/smoke, and scripted evidence capture; its release-publish job was skipped because it was a PR run.
 
 CI ran the installed Windows application at wide, medium, and narrow window sizes and captured title-bar and settings scenarios. The UI-evidence artifact exists, but its pixels have not been manually reviewed in this workspace. Therefore CI execution is verified, while visual acceptance remains incomplete. The local workspace is a stale, uncommitted snapshot with no repository commits, and this environment has no Flutter or Dart command; it is not used as a source of truth. GitHub Actions is the available build/test path.
 

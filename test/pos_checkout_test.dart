@@ -3,7 +3,6 @@ import 'package:material_ui/material_ui.dart';
 
 import 'package:ledgerline/data/ledger_database.dart';
 import 'package:ledgerline/data/ledger_repository.dart';
-import 'package:ledgerline/domain/accounting_engine.dart';
 import 'package:ledgerline/domain/product.dart';
 import 'package:ledgerline/domain/sales_invoice.dart';
 import 'package:ledgerline/presentation/pos_page.dart';
