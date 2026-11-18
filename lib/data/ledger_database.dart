@@ -12,7 +12,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 5,
+        version: 6,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -28,7 +28,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       inMemoryDatabasePath,
       options: OpenDatabaseOptions(
-        version: 5,
+        version: 6,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -98,8 +98,20 @@ class LedgerDatabase {
     if (oldVersion < 5) {
       await _createStockMovementsTable(db, seedCurrentBalances: true);
     }
+    if (oldVersion < 6) {
+      await _upgradeInvoicePaymentsToV6(db);
+    }
   }
 
+
+  static Future<void> _upgradeInvoicePaymentsToV6(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(invoice_payments)');
+    if (!columns.any((row) => row['name'] == 'payment_method')) {
+      await db.execute(
+        "ALTER TABLE invoice_payments ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'cash' CHECK (payment_method IN ('cash', 'bank_transfer'))",
+      );
+    }
+  }
 
   static Future<void> _upgradeProductsToV4(Database db) async {
     final columnRows = await db.rawQuery('PRAGMA table_info(products)');
@@ -275,6 +287,8 @@ class LedgerDatabase {
         invoice_id TEXT NOT NULL REFERENCES sales_invoices(id) ON DELETE CASCADE,
         payment_date TEXT NOT NULL,
         amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+        payment_method TEXT NOT NULL DEFAULT 'cash'
+          CHECK (payment_method IN ('cash', 'bank_transfer')),
         created_at TEXT NOT NULL
       )
     ''');

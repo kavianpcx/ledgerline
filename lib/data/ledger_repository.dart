@@ -16,12 +16,15 @@ import 'ledger_database.dart';
 class LedgerRepository {
   LedgerRepository(this._database);
 
+  static const Set<String> _allowedPaymentMethods = {'cash', 'bank_transfer'};
+
   LedgerDatabase _database;
 
   Future<void> initialize() async {
     final db = _database.handle;
     const starterAccounts = <Account>[
       Account(id: 'cash', code: '1000', name: 'Cash', type: AccountType.asset),
+      Account(id: 'bank', code: '1010', name: 'Bank', type: AccountType.asset),
       Account(id: 'receivables', code: '1100', name: 'Accounts receivable', type: AccountType.asset),
       Account(id: 'inventory', code: '1200', name: 'Inventory', type: AccountType.asset),
       Account(id: 'equipment', code: '1500', name: 'Equipment', type: AccountType.asset),
@@ -667,6 +670,13 @@ class LedgerRepository {
         'Customer, invoice lines, tax, and payment amounts must be valid.',
       );
     }
+    if (!_allowedPaymentMethods.contains(draft.paymentMethod)) {
+      throw ArgumentError.value(
+        draft.paymentMethod,
+        'paymentMethod',
+        'Use cash or bank_transfer.',
+      );
+    }
 
     await _database.handle.transaction((txn) async {
       await _requireAccountingCurrency(txn);
@@ -820,6 +830,7 @@ class LedgerRepository {
           'invoice_id': invoiceId,
           'payment_date': _dateOnly(draft.date),
           'amount_cents': draft.paymentAmountCents,
+          'payment_method': draft.paymentMethod,
           'created_at': createdAt,
         });
         await _insertTwoLineJournalEntry(
@@ -827,7 +838,8 @@ class LedgerRepository {
           entryId: 'pos_payment_' + invoiceId,
           date: draft.date,
           description: 'Invoice payment · ' + invoiceNumber + ' · ' + draft.customerName.trim(),
-          debitAccountId: 'cash',
+          debitAccountId:
+              draft.paymentMethod == 'bank_transfer' ? 'bank' : 'cash',
           creditAccountId: 'receivables',
           amountCents: draft.paymentAmountCents,
         );
@@ -838,6 +850,13 @@ class LedgerRepository {
   Future<void> recordInvoicePayment(InvoicePaymentDraft draft) async {
     if (draft.amountCents <= 0) {
       throw ArgumentError('Payment amount must be greater than zero.');
+    }
+    if (!_allowedPaymentMethods.contains(draft.paymentMethod)) {
+      throw ArgumentError.value(
+        draft.paymentMethod,
+        'paymentMethod',
+        'Use cash or bank_transfer.',
+      );
     }
 
     await _database.handle.transaction((txn) async {
@@ -873,6 +892,7 @@ class LedgerRepository {
         'invoice_id': draft.invoiceId,
         'payment_date': _dateOnly(draft.date),
         'amount_cents': draft.amountCents,
+        'payment_method': draft.paymentMethod,
         'created_at': createdAt,
       });
       await _insertBalancedEntry(
@@ -881,7 +901,8 @@ class LedgerRepository {
           date: draft.date,
           description: 'Invoice payment ${invoice['invoice_number']} · ${invoice['customer_name']}',
           amountCents: draft.amountCents,
-          debitAccountId: 'cash',
+          debitAccountId:
+              draft.paymentMethod == 'bank_transfer' ? 'bank' : 'cash',
           creditAccountId: 'receivables',
         ),
       );

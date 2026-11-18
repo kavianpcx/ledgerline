@@ -16,8 +16,10 @@
 
 - Add a database-paginated POS catalog and a cart that survives page navigation.
 - Revalidate cart prices and stock before checkout, and reject changed prices again inside the SQLite sale transaction.
-- Post invoice, stock reduction, sales/COGS journals, and an optional full cash receipt atomically; unpaid checkout remains in receivables.
-- Add POS widget and repository coverage for cash and on-account checkout, balanced accounting, inventory reduction, stale prices, and cart clearing.
+- Post invoice, stock reduction, sales/COGS journals, and an optional full cash or bank-transfer receipt atomically; unpaid checkout remains in receivables.
+- Add cash and bank-transfer payment choices to POS checkout, persist the method, and debit the matching cash or bank account.
+- Migrate existing invoice payments to the cash method while preserving their balances.
+- Add POS widget and repository coverage for cash, bank-transfer, and on-account checkout, balanced accounting, inventory reduction, stale prices, and cart clearing.
 - Add append-only stock movement records for opening stock, CSV imports, manual adjustments, and sales.
 - Migrate existing on-hand quantities as labeled balance-forward entries without changing ledger balances or inventing prior transactions.
 - Add indexed, database-paginated product stock history and prevent movement rows from being edited or deleted.

@@ -369,6 +369,52 @@ void main() {
     expect(payments.single['amount_cents'], 5000);
   });
 
+  test('migrates version 5 invoice payments to the cash method', () async {
+    final directory = await Directory.systemTemp.createTemp('ledgerline-payment-migration-');
+    addTearDown(() => directory.delete(recursive: true));
+    final path = '${directory.path}${Platform.pathSeparator}version-five.sqlite';
+    final versionFive = await LedgerDatabase.open(path);
+    await versionFive.handle.insert('sales_invoices', {
+      'id': 'legacy-invoice-v5',
+      'invoice_number': 'INV-2026-000002',
+      'customer_name': 'Legacy customer',
+      'issue_date': '2026-01-03',
+      'status': 'paid',
+      'subtotal_cents': 4200,
+      'tax_cents': 0,
+      'total_cents': 4200,
+      'created_at': '2026-01-03T12:00:00Z',
+    });
+    await versionFive.handle.execute('DROP TABLE invoice_payments');
+    await versionFive.handle.execute('''
+      CREATE TABLE invoice_payments (
+        id TEXT PRIMARY KEY,
+        invoice_id TEXT NOT NULL REFERENCES sales_invoices(id) ON DELETE CASCADE,
+        payment_date TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await versionFive.handle.execute(
+      'CREATE INDEX invoice_payments_by_invoice ON invoice_payments(invoice_id, payment_date DESC)',
+    );
+    await versionFive.handle.insert('invoice_payments', {
+      'id': 'legacy-payment-v5',
+      'invoice_id': 'legacy-invoice-v5',
+      'payment_date': '2026-01-03',
+      'amount_cents': 4200,
+      'created_at': '2026-01-03T12:00:00Z',
+    });
+    await versionFive.handle.execute('PRAGMA user_version = 5');
+    await versionFive.close();
+
+    final migrated = await LedgerDatabase.open(path);
+    addTearDown(migrated.close);
+    final payments = await migrated.handle.query('invoice_payments');
+    expect(payments, hasLength(1));
+    expect(payments.single['payment_method'], 'cash');
+  });
+
   test('persists the theme and locale settings', () async {
     final database = await LedgerDatabase.openInMemory();
     addTearDown(database.close);

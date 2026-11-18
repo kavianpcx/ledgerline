@@ -129,6 +129,44 @@ void main() {
     expect(savedCart, isEmpty);
   });
 
+  testWidgets('bank transfer checkout records the selected payment method',
+      (tester) async {
+    final repository = await _createWidgetRepository(tester);
+    addTearDown(() async {
+      await tester.runAsync(repository.close);
+    });
+
+    var refreshCount = 0;
+    await _mountPos(
+      tester,
+      repository,
+      const {},
+      onCompleted: () async {
+        refreshCount++;
+      },
+      onCartChanged: (_) {},
+    );
+
+    await tester.tap(find.byKey(const ValueKey('pos-product-COF-01')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('pos-checkout')));
+    await tester.tap(find.byKey(const Key('pos-checkout')));
+    await _pumpUntil(
+      tester,
+      () => find.byKey(const Key('pos-submit-checkout')).evaluate().isNotEmpty,
+    );
+    await tester.tap(find.byKey(const Key('pos-payment-method')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bank transfer').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('pos-submit-checkout')));
+    await _pumpUntil(tester, () => refreshCount == 1);
+
+    expect(repository.invoiceDrafts, hasLength(1));
+    expect(repository.invoiceDrafts.single.paymentAmountCents, 1000);
+    expect(repository.invoiceDrafts.single.paymentMethod, 'bank_transfer');
+  });
+
   testWidgets('unpaid checkout creates an on-account invoice draft',
       (tester) async {
     final repository = await _createWidgetRepository(tester);
@@ -155,7 +193,7 @@ void main() {
       tester,
       () => find.byKey(const Key('pos-submit-checkout')).evaluate().isNotEmpty,
     );
-    await tester.tap(find.byKey(const Key('pos-pay-cash-now')));
+    await tester.tap(find.byKey(const Key('pos-collect-payment-now')));
     await tester.pump();
     await tester.tap(find.byKey(const Key('pos-submit-checkout')));
     await _pumpUntil(tester, () => refreshCount == 1);
@@ -230,9 +268,44 @@ void main() {
     expect(snapshot.entries, hasLength(3));
   });
 
+  test('bank transfer checkout posts to the bank account and records its method',
+      () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await _addTestProduct(repository);
+    final product = (await repository.loadProducts()).single;
+
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Walk-in customer',
+      date: DateTime(2026, 11, 18),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+      paymentAmountCents: 1000,
+      paymentMethod: 'bank_transfer',
+    ));
+
+    final snapshot = await repository.loadSnapshot();
+    expect(snapshot.invoices.single.status, 'paid');
+    expect(snapshot.balancesByAccount['bank'], 1000);
+    expect(snapshot.balancesByAccount['cash'], 0);
+    final payments = await database.handle.query('invoice_payments');
+    expect(payments.single['payment_method'], 'bank_transfer');
+  });
+
   test('on-account invoice can be settled separately', () async {
-    final repository = await _createRepository();
-    addTearDown(repository.close);
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
     await _addTestProduct(repository);
     final product = (await repository.loadProducts()).single;
 
@@ -251,8 +324,14 @@ void main() {
       invoiceId: invoice.id,
       amountCents: invoice.balanceDueCents,
       date: DateTime(2026, 11, 18),
+      paymentMethod: 'bank_transfer',
     ));
-    invoice = (await repository.loadSnapshot()).invoices.single;
+    final snapshot = await repository.loadSnapshot();
+    expect(snapshot.balancesByAccount['bank'], 1000);
+    expect(snapshot.balancesByAccount['cash'], 0);
+    final payments = await database.handle.query('invoice_payments');
+    expect(payments.single['payment_method'], 'bank_transfer');
+    invoice = snapshot.invoices.single;
     expect(invoice.status, 'paid');
     expect(invoice.paidCents, 1000);
     expect(invoice.balanceDueCents, 0);

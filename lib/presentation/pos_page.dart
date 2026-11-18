@@ -598,7 +598,8 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
                 expectedUnitPriceCents: line.product.unitPriceCents,
               ),
           ],
-          paymentAmountCents: request.payInCash ? total : 0,
+          paymentAmountCents: request.collectPaymentNow ? total : 0,
+          paymentMethod: request.paymentMethod,
         ),
       );
       invoicePosted = true;
@@ -610,7 +611,7 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
       await _loadProducts(pageIndex: _pageIndex);
       if (mounted) {
         _notify(
-          tr(context, request.payInCash ? 'posSalePaid' : 'posSaleOnAccount'),
+          tr(context, request.collectPaymentNow ? 'posSalePaid' : 'posSaleOnAccount'),
         );
       }
     } on Object catch (error) {
@@ -645,11 +646,13 @@ class PosCartLine {
 class _PosCheckoutRequest {
   const _PosCheckoutRequest({
     required this.customerName,
-    required this.payInCash,
+    required this.collectPaymentNow,
+    required this.paymentMethod,
   });
 
   final String customerName;
-  final bool payInCash;
+  final bool collectPaymentNow;
+  final String paymentMethod;
 }
 
 class _PosCheckoutDialog extends StatefulWidget {
@@ -670,7 +673,8 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
   final TextEditingController _customerName = TextEditingController(
     text: 'Walk-in customer',
   );
-  bool _payInCash = true;
+  bool _collectPaymentNow = true;
+  String _paymentMethod = 'cash';
 
   @override
   void dispose() {
@@ -700,15 +704,40 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
                 ),
                 const SizedBox(height: 12),
                 CheckboxListTile(
-                  key: const Key('pos-pay-cash-now'),
-                  value: _payInCash,
+                  key: const Key('pos-collect-payment-now'),
+                  value: _collectPaymentNow,
                   contentPadding: EdgeInsets.zero,
                   controlAffinity: ListTileControlAffinity.leading,
                   onChanged: (value) =>
-                      setState(() => _payInCash = value ?? false),
-                  title: Text(tr(context, 'cashPaymentNow')),
-                  subtitle: Text(tr(context, 'cashPaymentHint')),
+                      setState(() => _collectPaymentNow = value ?? false),
+                  title: Text(tr(context, 'posCollectPaymentNow')),
+                  subtitle: Text(tr(context, 'posPaymentHint')),
                 ),
+                if (_collectPaymentNow) ...[
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    key: const Key('pos-payment-method'),
+                    value: _paymentMethod,
+                    decoration: InputDecoration(
+                      labelText: tr(context, 'posPaymentMethod'),
+                    ),
+                    items: [
+                      DropdownMenuItem(
+                        value: 'cash',
+                        child: Text(tr(context, 'posPaymentCash')),
+                      ),
+                      DropdownMenuItem(
+                        value: 'bank_transfer',
+                        child: Text(tr(context, 'posPaymentBankTransfer')),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => _paymentMethod = value);
+                      }
+                    },
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -742,7 +771,8 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
     Navigator.of(context).pop(
       _PosCheckoutRequest(
         customerName: _customerName.text.trim(),
-        payInCash: _payInCash,
+        collectPaymentNow: _collectPaymentNow,
+        paymentMethod: _paymentMethod,
       ),
     );
   }

@@ -17,6 +17,7 @@ class InvoiceDraft {
     required this.lines,
     this.taxCents = 0,
     this.paymentAmountCents = 0,
+    this.paymentMethod = 'cash',
   });
 
   final String customerName;
@@ -24,6 +25,7 @@ class InvoiceDraft {
   final List<InvoiceLineDraft> lines;
   final int taxCents;
   final int paymentAmountCents;
+  final String paymentMethod;
 }
 
 class InvoicePaymentDraft {
@@ -31,11 +33,13 @@ class InvoicePaymentDraft {
     required this.invoiceId,
     required this.amountCents,
     required this.date,
+    this.paymentMethod = 'cash',
   });
 
   final String invoiceId;
   final int amountCents;
   final DateTime date;
+  final String paymentMethod;
 }
 
 class SalesInvoice {
