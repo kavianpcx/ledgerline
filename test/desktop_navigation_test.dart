@@ -91,6 +91,30 @@ void main() {
     expect(selected, [3]);
   });
 
+  testWidgets('very narrow sidebar keeps navigation without a nonfunctional expand control', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Row(
+          children: [
+            LedgerDesktopSidebar(
+              destinations: _destinations,
+              selectedIndex: 0,
+              collapsed: true,
+              canToggleExpanded: false,
+              onDestinationSelected: (_) {},
+              onCollapsedChanged: (_) {},
+            ),
+            const Expanded(child: SizedBox()),
+          ],
+        ),
+      ),
+    ));
+
+    expect(find.byKey(const Key('desktop-sidebar-toggle')), findsNothing);
+    expect(find.byTooltip('Products'), findsOneWidget);
+    expect(find.byKey(const Key('desktop-sidebar-search-button')), findsOneWidget);
+  });
+
   testWidgets('collapsed sidebar exposes tooltips and searchable page selection', (tester) async {
     final selected = <int>[];
     await tester.pumpWidget(MaterialApp(
