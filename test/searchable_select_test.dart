@@ -52,7 +52,7 @@ void main() {
       const Offset(0, -260),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Currency option 15'), findsOneWidget);
+    expect(find.text('Currency option 5'), findsOneWidget);
 
     await tester.tap(
       find.byKey(const ValueKey('searchable-select-search-currency')),
