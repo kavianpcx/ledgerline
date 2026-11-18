@@ -66,6 +66,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handleHardwareKey);
     switch (widget.visualScenario) {
       case 'settings-light':
         _selectedIndex = 7;
@@ -98,8 +99,30 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     _businessNameController.dispose();
     super.dispose();
+  }
+
+  bool _handleHardwareKey(KeyEvent event) {
+    if (!io.Platform.isWindows || event is! KeyDownEvent) return false;
+    final keyboard = HardwareKeyboard.instance;
+    if (!keyboard.isControlPressed || !keyboard.isShiftPressed) return false;
+    final window = WindowManager.instance.getCurrent();
+    if (window == null) return false;
+    if (event.logicalKey == LogicalKeyboardKey.keyM) {
+      window.minimize();
+      return true;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyF) {
+      if (window.isMaximized) {
+        window.unmaximize();
+      } else {
+        window.maximize();
+      }
+      return true;
+    }
+    return false;
   }
 
   String _updateStatus() {
@@ -560,25 +583,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                 ),
         );
         if (!io.Platform.isWindows) return scaffold;
-        return Focus(
-          autofocus: true,
-          child: CallbackShortcuts(
-            bindings: <ShortcutActivator, VoidCallback>{
-            const SingleActivator(LogicalKeyboardKey.keyM, control: true, shift: true):
-                () => WindowManager.instance.getCurrent()?.minimize(),
-            const SingleActivator(LogicalKeyboardKey.keyF, control: true, shift: true): () {
-              final window = WindowManager.instance.getCurrent();
-              if (window == null) return;
-              if (window.isMaximized) {
-                window.unmaximize();
-              } else {
-                window.maximize();
-              }
-            },
-          },
-            child: DragToResizeArea(child: scaffold),
-          ),
-        );
+        return DragToResizeArea(child: scaffold);
       },
     );
   }
