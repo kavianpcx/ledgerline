@@ -45,7 +45,7 @@ void main() {
     expect(find.text('Sales & POS'), findsOneWidget);
     expect(find.text('Inventory & warehouses'), findsOneWidget);
 
-    await tester.tap(find.text('Display currency'));
+    await tester.tap(find.text('Currency and exchange rates'));
     await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(const ValueKey('searchable-select-trigger-settings-currency')),

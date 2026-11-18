@@ -16,6 +16,7 @@ import '../domain/account.dart';
 import '../domain/app_settings.dart';
 import '../domain/accounting_engine.dart';
 import '../domain/ledger_entry.dart';
+import '../domain/money.dart';
 import '../domain/product.dart';
 import '../domain/sales_invoice.dart';
 import '../services/offline_ocr_service.dart';
@@ -226,6 +227,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   }
 
   Future<void> _addEntry(LedgerSnapshot snapshot) async {
+    if (!_requireAccountingCurrency()) return;
     final draft = await showDialog<JournalDraft>(
       context: context,
       builder: (context) => _EntryDialog(
@@ -266,6 +268,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   }
 
   Future<void> _addProduct() async {
+    if (!_requireAccountingCurrency()) return;
     final draft = await showDialog<ProductDraft>(
       context: context,
       builder: (context) => _ProductDialog(currencyCode: widget.settings.currencyCode),
@@ -281,6 +284,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   }
 
   Future<void> _adjustStock(Product product, int delta) async {
+    if (!_requireAccountingCurrency()) return;
     try {
       await widget.repository.adjustStock(product.id, delta);
       await _reload();
@@ -291,6 +295,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   }
 
   Future<void> _addInvoice(LedgerSnapshot snapshot) async {
+    if (!_requireAccountingCurrency()) return;
     if (snapshot.products.isEmpty) {
       _notify(tr(context, 'invoiceNoProducts'));
       return;
@@ -313,6 +318,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   }
 
   Future<void> _recordInvoicePayment(SalesInvoice invoice) async {
+    if (!_requireAccountingCurrency()) return;
     final draft = await showDialog<InvoicePaymentDraft>(
       context: context,
       builder: (context) => _InvoicePaymentDialog(
@@ -330,6 +336,78 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     }
   }
 
+
+  bool _requireAccountingCurrency() {
+    if (widget.settings.accountingCurrencyConfigured) return true;
+    _notify(tr(context, 'currencySetupRequired'));
+    setState(() {
+      _selectedIndex = 7;
+      _settingsSectionIndex = 4;
+    });
+    return false;
+  }
+
+  Future<void> _chooseAccountingCurrency(String currencyCode) async {
+    if (currencyCode == widget.settings.currencyCode &&
+        widget.settings.accountingCurrencyConfigured) {
+      return;
+    }
+
+    late final bool hasMonetaryData;
+    try {
+      hasMonetaryData = await widget.repository.hasMonetaryRecords();
+    } on Object catch (error) {
+      if (mounted) _notify('${tr(context, 'errorCouldNotSave')}: $error');
+      return;
+    }
+    if (!mounted) return;
+    if (hasMonetaryData && widget.settings.accountingCurrencyConfigured) {
+      _notify(tr(context, 'currencyLocked'));
+      return;
+    }
+
+    var confirmed = !hasMonetaryData;
+    if (hasMonetaryData) {
+      confirmed = await showDialog<bool>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+              title: Text(tr(dialogContext, 'currencyConfirmLegacyTitle')),
+              content: Text(
+                tr(dialogContext, 'currencyConfirmLegacyBody')
+                    .replaceAll('{currency}', currencyCode),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: Text(tr(dialogContext, 'cancel')),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: Text(tr(dialogContext, 'confirmCurrency')),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+    }
+    if (!confirmed || !mounted) return;
+
+    try {
+      await widget.repository.configureAccountingCurrency(
+        currencyCode: currencyCode,
+        confirmExistingAmounts: hasMonetaryData,
+      );
+      await widget.onSettingsChanged(
+        widget.settings.copyWith(
+          currencyCode: currencyCode,
+          accountingCurrencyConfigured: true,
+        ),
+      );
+      if (mounted) _notify(tr(context, 'settingsSaved'));
+    } on Object catch (error) {
+      if (mounted) _notify('${tr(context, 'errorCouldNotSave')}: $error');
+    }
+  }
 
   void _notify(String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
@@ -558,9 +636,30 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                       return _LoadError(message: result.error.toString(), onRetry: _reload);
                     }
                     final snapshot = result.data!;
-                    return RefreshIndicator(
-                      onRefresh: _reload,
-                      child: _page(snapshot, contentWidth),
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (!widget.settings.accountingCurrencyConfigured)
+                          MaterialBanner(
+                            content: Text(tr(context, 'currencySetupRequired')),
+                            leading: const Icon(Icons.info_outline_rounded),
+                            actions: [
+                              TextButton(
+                                onPressed: () => setState(() {
+                                  _selectedIndex = 7;
+                                  _settingsSectionIndex = 4;
+                                }),
+                                child: Text(tr(context, 'configureCurrency')),
+                              ),
+                            ],
+                          ),
+                        Expanded(
+                          child: RefreshIndicator(
+                            onRefresh: _reload,
+                            child: _page(snapshot, contentWidth),
+                          ),
+                        ),
+                      ],
                     );
                   },
                 ),
@@ -749,7 +848,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
       ('settingsBusiness', Icons.business_rounded),
       ('appearance', Icons.palette_outlined),
       ('languageRegion', Icons.translate_rounded),
-      ('currency', Icons.currency_exchange_rounded),
+      ('currencySettings', Icons.currency_exchange_rounded),
       ('accountingSettings', Icons.account_balance_rounded),
       ('salesSettings', Icons.point_of_sale_rounded),
       ('inventorySettings', Icons.inventory_2_outlined),
@@ -891,9 +990,19 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         );
       case 4:
         return _settingsCard(
-          title: tr(context, 'currency'),
+          title: tr(context, 'currencySettings'),
           subtitle: tr(context, 'currencyHint'),
           children: [
+            Text(
+              tr(
+                context,
+                widget.settings.accountingCurrencyConfigured
+                    ? 'currencyLockedHint'
+                    : 'currencyNotConfiguredHint',
+              ),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
             SearchableSelect<String>(
               id: 'settings-currency',
               label: tr(context, 'currency'),
@@ -907,9 +1016,14 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                 SearchableSelectOption(value: 'CAD', label: 'CAD · Canadian dollar'),
                 SearchableSelectOption(value: 'AUD', label: 'AUD · Australian dollar'),
                 SearchableSelectOption(value: 'AED', label: 'AED · UAE dirham'),
+                SearchableSelectOption(value: 'JPY', label: 'JPY · Japanese yen'),
+                SearchableSelectOption(value: 'IRR', label: 'IRR · Iranian rial'),
+                SearchableSelectOption(value: 'TOMAN', label: 'TOMAN · Iranian toman'),
               ],
               onChanged: (value) {
-                if (value != null) widget.onSettingsChanged(widget.settings.copyWith(currencyCode: value));
+                if (value != null) {
+                  unawaited(_chooseAccountingCurrency(value));
+                }
               },
               autoOpen: widget.visualScenario == 'currency-popup',
             ),
@@ -1366,9 +1480,9 @@ class _EntryDialogState extends State<_EntryDialog> {
                   TextFormField(
                     controller: _amount,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: InputDecoration(labelText: tr(context, 'amount'), prefixText: '${widget.currencyCode} ', hintText: '0.00'),
+                    decoration: InputDecoration(labelText: tr(context, 'amount'), prefixText: '${widget.currencyCode} ', hintText: CurrencyDefinition.of(widget.currencyCode).formatInput(0)),
                     validator: (value) {
-                      final cents = _parseCents(value ?? '');
+                      final cents = _parseCents(value ?? '', currencyCode: widget.currencyCode);
                       return cents == null || cents <= 0 ? 'Enter an amount greater than zero.' : null;
                     },
                   ),
@@ -1445,7 +1559,7 @@ class _EntryDialogState extends State<_EntryDialog> {
     final draft = JournalDraft(
       date: _date,
       description: _description.text.trim(),
-      amountCents: _parseCents(_amount.text)!,
+      amountCents: _parseCents(_amount.text, currencyCode: widget.currencyCode)!,
       debitAccountId: _debitId!,
       creditAccountId: _creditId!,
     );
@@ -1457,16 +1571,14 @@ class _EntryDialogState extends State<_EntryDialog> {
     }
   }
 
-  static int? _parseCents(String raw) {
-    final value = raw.trim().replaceAll(',', '.');
-    final parts = value.split('.');
-    if (parts.isEmpty || parts.length > 2 || !RegExp(r'^\d+$').hasMatch(parts.first)) return null;
-    if (parts.length == 2 && (parts[1].isEmpty || parts[1].length > 2 || !RegExp(r'^\d+$').hasMatch(parts[1]))) return null;
-    final whole = int.tryParse(parts.first);
-    final fraction = parts.length == 1 ? 0 : int.tryParse(parts[1].padRight(2, '0'));
-    if (whole == null || fraction == null) return null;
-    return whole * 100 + fraction;
-  }
+  static int? _parseCents(
+    String raw, {
+    String currencyCode = 'USD',
+  }) =>
+      CurrencyDefinition.parseMinorUnits(
+        raw,
+        currencyCode: currencyCode,
+      );
 }
 
 class _ProductDialog extends StatefulWidget {
@@ -1509,9 +1621,9 @@ class _ProductDialogState extends State<_ProductDialog> {
                 const SizedBox(height: 12),
                 TextFormField(controller: _sku, decoration: InputDecoration(labelText: tr(context, 'sku')), validator: _required),
                 const SizedBox(height: 12),
-                TextFormField(controller: _price, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: tr(context, 'sellingPrice'), prefixText: '${widget.currencyCode} '), validator: (value) { final cents = _EntryDialogState._parseCents(value ?? ''); return cents == null || cents <= 0 ? 'Enter an amount greater than zero.' : null; }),
+                TextFormField(controller: _price, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: tr(context, 'sellingPrice'), prefixText: '${widget.currencyCode} '), validator: (value) { final cents = _EntryDialogState._parseCents(value ?? '', currencyCode: widget.currencyCode); return cents == null || cents <= 0 ? 'Enter an amount greater than zero.' : null; }),
                 const SizedBox(height: 12),
-                TextFormField(controller: _cost, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: tr(context, 'unitCost'), prefixText: '${widget.currencyCode} '), validator: (value) => value == null || value.trim().isEmpty || _EntryDialogState._parseCents(value) == null ? 'Enter a valid amount.' : null),
+                TextFormField(controller: _cost, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: tr(context, 'unitCost'), prefixText: '${widget.currencyCode} '), validator: (value) => value == null || value.trim().isEmpty || _EntryDialogState._parseCents(value, currencyCode: widget.currencyCode) == null ? 'Enter a valid amount.' : null),
                 const SizedBox(height: 12),
                 TextFormField(controller: _stock, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: tr(context, 'stockOnHand')), validator: (value) => int.tryParse(value ?? '') == null || int.parse(value!) < 0 ? 'Enter zero or more.' : null),
               ]),
@@ -1533,8 +1645,8 @@ class _ProductDialogState extends State<_ProductDialog> {
       ProductDraft(
         sku: _sku.text,
         name: _name.text,
-        unitPriceCents: _EntryDialogState._parseCents(_price.text)!,
-        unitCostCents: _EntryDialogState._parseCents(_cost.text)!,
+        unitPriceCents: _EntryDialogState._parseCents(_price.text, currencyCode: widget.currencyCode)!,
+        unitCostCents: _EntryDialogState._parseCents(_cost.text, currencyCode: widget.currencyCode)!,
         stockQuantity: int.parse(_stock.text),
       ),
     );
@@ -1593,7 +1705,7 @@ class _InvoiceDialogState extends State<_InvoiceDialog> {
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(labelText: tr(context, 'tax'), prefixText: '${widget.currencyCode} '),
                 validator: (value) {
-                  final cents = _EntryDialogState._parseCents(value ?? '');
+                  final cents = _EntryDialogState._parseCents(value ?? '', currencyCode: widget.currencyCode);
                   return cents == null ? 'Enter a non-negative amount.' : null;
                 },
               ),
@@ -1678,7 +1790,7 @@ class _InvoiceDialogState extends State<_InvoiceDialog> {
           for (final line in _lines)
             InvoiceLineDraft(productId: line.productId!, quantity: int.parse(line.quantity.text)),
         ],
-        taxCents: _EntryDialogState._parseCents(_tax.text)!,
+        taxCents: _EntryDialogState._parseCents(_tax.text, currencyCode: widget.currencyCode)!,
       ),
     );
   }
@@ -1706,7 +1818,8 @@ class _InvoicePaymentDialogState extends State<_InvoicePaymentDialog> {
   void initState() {
     super.initState();
     _amount = TextEditingController(
-      text: (widget.invoice.balanceDueCents / 100).toStringAsFixed(2),
+      text: CurrencyDefinition.of(widget.currencyCode)
+          .formatInput(widget.invoice.balanceDueCents),
     );
   }
 
@@ -1744,7 +1857,7 @@ class _InvoicePaymentDialogState extends State<_InvoicePaymentDialog> {
                   ),
                   validator: (value) {
                     final amountCents =
-                        _EntryDialogState._parseCents(value ?? '');
+                        _EntryDialogState._parseCents(value ?? '', currencyCode: widget.currencyCode);
                     if (amountCents == null || amountCents <= 0) {
                       return tr(context, 'paymentAmountError');
                     }
@@ -1796,7 +1909,7 @@ class _InvoicePaymentDialogState extends State<_InvoicePaymentDialog> {
       context,
       InvoicePaymentDraft(
         invoiceId: widget.invoice.id,
-        amountCents: _EntryDialogState._parseCents(_amount.text)!,
+        amountCents: _EntryDialogState._parseCents(_amount.text, currencyCode: widget.currencyCode)!,
         date: _paymentDate,
       ),
     );
@@ -1977,7 +2090,7 @@ class _SmartImportPanelState extends State<_SmartImportPanel> {
         final fields = row.split(',').map((field) => field.trim()).toList();
         if (fields.length != 5) throw FormatException('Row ${index + 1}: expected five comma-separated fields.');
         final date = DateTime.tryParse(fields[0]);
-        final cents = _EntryDialogState._parseCents(fields[2]);
+        final cents = _EntryDialogState._parseCents(fields[2], currencyCode: widget.currencyCode);
         final debit = accountsByCode[fields[3].toLowerCase()] ?? accountsById[fields[3].toLowerCase()];
         final credit = accountsByCode[fields[4].toLowerCase()] ?? accountsById[fields[4].toLowerCase()];
         if (date == null || cents == null || cents <= 0 || fields[1].isEmpty || debit == null || credit == null) {
@@ -2314,16 +2427,8 @@ class _ReportCard extends StatelessWidget {
       );
 }
 
-String _money(int cents, [String currencyCode = 'USD']) {
-  final negative = cents < 0;
-  final absolute = cents.abs();
-  final dollars = (absolute ~/ 100).toString().replaceAllMapped(
-        RegExp(r'\B(?=(\d{3})+(?!\d))'),
-        (_) => ',',
-      );
-  final fraction = (absolute % 100).toString().padLeft(2, '0');
-  return '${negative ? '-' : ''}$currencyCode $dollars.$fraction';
-}
+String _money(int minorUnits, [String currencyCode = 'USD']) =>
+    CurrencyDefinition.of(currencyCode).formatMinorUnits(minorUnits);
 
 String _shortDate(BuildContext context, DateTime date) {
   if (AppStrings.of(context).isPersian) {
