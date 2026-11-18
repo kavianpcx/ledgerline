@@ -472,7 +472,8 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                       ),
                     ),
                   ),
-                )
+                ),
+              )
               : AppBar(
                   titleSpacing: isWide ? 32 : 20,
                   title: Row(
@@ -494,7 +495,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                     ],
                   ),
                   actions: [
-                    if (_selectedIndex == 0 || _selectedIndex == 1)
+                    if (!isWindowsDesktop && (_selectedIndex == 0 || _selectedIndex == 1))
                       FutureBuilder<LedgerSnapshot>(
                         future: _snapshot,
                         builder: (context, result) => Padding(
@@ -1149,7 +1150,16 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
           const SizedBox(height: 6),
           Text(tr(context, 'journalHint'),
               style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: FilledButton.icon(
+              onPressed: () => _addEntry(snapshot),
+              icon: const Icon(Icons.add_rounded),
+              label: Text(tr(context, 'newEntry')),
+            ),
+          ),
+          const SizedBox(height: 18),
           _EntryList(entries: snapshot.entries, emptyMessage: tr(context, 'noEntries'), currencyCode: widget.settings.currencyCode),
         ],
       );
