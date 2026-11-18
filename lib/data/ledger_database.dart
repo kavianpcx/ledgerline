@@ -105,6 +105,18 @@ class LedgerDatabase {
 
 
   static Future<void> _upgradeInvoicePaymentsToV6(Database db) async {
+    final paymentTables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'invoice_payments'",
+    );
+    if (paymentTables.isEmpty) {
+      final invoiceTables = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sales_invoices'",
+      );
+      if (invoiceTables.isEmpty) return;
+      await _createInvoicePaymentsTable(db);
+      return;
+    }
+
     final columns = await db.rawQuery('PRAGMA table_info(invoice_payments)');
     if (!columns.any((row) => row['name'] == 'payment_method')) {
       await db.execute(
