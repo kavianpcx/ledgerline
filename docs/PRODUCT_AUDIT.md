@@ -2,7 +2,7 @@
 
 ## Scope and evidence
 
-This audit compares the current GitHub source with `docs/PRODUCT_SPECIFICATION.md`. The standalone master prompt mentioned in the development request was not present in this workspace, so any requirements unique to that attachment remain unavailable.
+This audit compares the current GitHub source with `docs/PRODUCT_SPECIFICATION.md` and distinguishes merged code from changes under review.
 
 Current `main` is `ab615a02f369155fbd5ad44ab170f0a3c7c4005a`. PRs #2 through #5 are merged: Windows sidebar repair, currency safeguards, editable/paginated catalog, and reviewed product CSV import. The main push workflow [run 44371927172](https://github.com/kavianpcx/ledgerline/actions/runs/44371927172) completed successfully, including analysis, the test matrix, and Windows packaging/smoke checks.
 

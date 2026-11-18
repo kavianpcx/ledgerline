@@ -2074,6 +2074,7 @@ class _StockMovementHistoryDialogState
           ),
         ],
       );
+}
 
 class _ProductDialog extends StatefulWidget {
   const _ProductDialog({required this.currencyCode, this.product});
