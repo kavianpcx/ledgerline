@@ -182,7 +182,10 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         const <String>[],
         mode: io.ProcessStartMode.detached,
       );
-      io.exit(0);
+      final window = WindowManager.instance.getCurrent();
+      if (window == null || !window.close()) {
+        throw StateError('Ledgerline could not close cleanly before installation.');
+      }
     } on Object catch (error) {
       if (mounted) _notify(tr(context, 'updateDownloadFailed') + ': ' + error.toString());
     } finally {
