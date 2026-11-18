@@ -16,6 +16,8 @@ The current directive expands the product scope to Windows and Android. The olde
 
 ## Broken or regressed
 
+- **History comparison:** the earlier Windows accounting implementation at commit `7d7782f27670f70eb2ccbc3b442fcb20d5731eb1` used a labeled left `NavigationRail` at widths of 900 logical pixels and above, but still fell back to bottom navigation when narrow. The later integrated-caption change (commit `81502f86`) removed that rail on Windows and put page icons in the title bar. The repair restores left-side navigation at every Windows width and improves the older layout with compact-mode persistence and search.
+
 - **Windows navigation:** the custom title bar contains nine primary page icons. The desktop NavigationRail is explicitly disabled on Windows. At widths below 900 logical pixels the scaffold uses Android-style bottom navigation. This conflicts with the requested permanent left sidebar at every Windows width.
 - **Title bar responsibilities:** the title bar mixes primary navigation and a page-specific add-entry action into the window caption. It should retain Ledgerline identity and window controls, with optional global actions only.
 - **Sidebar preferences:** no expanded/collapsed state is stored, and the current menu has no searchable grouped sidebar.
