@@ -53,8 +53,8 @@ class _LedgerDesktopSidebarState extends State<LedgerDesktopSidebar> {
       width: expanded ? 252 : 76,
       decoration: BoxDecoration(
         color: Theme.of(context).scaffoldBackgroundColor,
-        border: BorderDirectional(
-          end: BorderSide(color: colors.outlineVariant.withValues(alpha: 0.7)),
+        border: Border(
+          right: BorderSide(color: colors.outlineVariant.withValues(alpha: 0.7)),
         ),
       ),
       child: Column(
@@ -141,19 +141,7 @@ class _LedgerDesktopSidebarState extends State<LedgerDesktopSidebar> {
               query: _searchController.text.trim().toLowerCase(),
             ),
           ),
-          if (!expanded)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Tooltip(
-                message: tr(context, 'settings'),
-                child: IconButton(
-                  onPressed: () => widget.onDestinationSelected(7),
-                  icon: Icon(
-                    widget.selectedIndex == 7 ? widget.destinations[7].$2 : widget.destinations[7].$3,
-                  ),
-                ),
-              ),
-            ),
+
         ],
       ),
     );
