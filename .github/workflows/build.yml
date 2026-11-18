@@ -334,6 +334,7 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
+          prerelease: ${{ contains(steps.version.outputs.tag, '-') }}
           files: |
             release-assets/ledgerline-windows-setup.exe
             release-assets/ui-evidence/*.png

@@ -1,9 +1,13 @@
 # Changelog
 
-## 0.5.0 - 2026-11-18
+## 0.5.1-beta.1
 
-- Integrated the Windows caption into the app header and added initial-focus support for window-level minimize and maximize/restore shortcuts.
-- Replaced native dropdowns with a shared bounded searchable select with internal scrolling, keyboard selection, RTL positioning, and selected-item highlighting.
-- Expanded the Settings page into a navigable control center and made its navigation adapt to narrow layouts.
-- Added Windows CI installation/startup/clean-shutdown checks and screenshot scenarios for the titlebar, light and dark settings, Persian RTL, and the open currency selector.
-- Kept limitations explicit: authentication and encrypted backups, scalable data tables, a standalone updater with progress and recovery, and several business modules remain unfinished.
+Windows-only milestone prerelease.
+
+- Restore the permanent left Windows sidebar at wide, medium, and narrow window widths.
+- Move primary page navigation out of the integrated title bar while retaining the app identity and window controls.
+- Add grouped searchable navigation, compact-mode tooltips, sidebar collapse animation, and persisted sidebar preference.
+- Keep Android navigation adaptive in source, but this prerelease does not include an Android build.
+- Capture Windows screenshots for sidebar widths, title bar, light/dark appearance, Persian layout, and the currency selector.
+
+This is an unfinished product milestone. It does not include the full Android application, secure multi-user access, device synchronization, complete POS/restaurant workflows, full document import, or production-ready financial/security controls.
