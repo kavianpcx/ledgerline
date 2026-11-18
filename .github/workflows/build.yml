@@ -133,10 +133,60 @@ jobs:
       - name: Package installer
         shell: pwsh
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\ledgerline.iss'
+      - name: Capture Windows UI evidence
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class LedgerlineWindowTest {
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr handle);
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr handle, int command);
+          }
+          "@
+          $evidenceDirectory = Join-Path $PWD 'ui-evidence'
+          New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
+          $scenarios = @('titlebar', 'settings-light', 'settings-dark', 'settings-fa', 'currency-popup')
+          foreach ($scenario in $scenarios) {
+            Write-Host "Building visual scenario: $scenario"
+            & flutter build windows --debug "--dart-define=LEDGERLINE_VISUAL_SCENARIO=$scenario"
+            if ($LASTEXITCODE -ne 0) { throw "Windows debug build failed for scenario $scenario." }
+            $applicationPath = Join-Path $PWD 'build/windows/x64/runner/Debug/ledgerline.exe'
+            if (-not (Test-Path -LiteralPath $applicationPath)) { throw 'Debug application executable was not produced.' }
+            $process = Start-Process -FilePath $applicationPath -PassThru
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              Start-Sleep -Seconds 1
+              $process.Refresh()
+              if ($process.HasExited) { throw "Ledgerline exited during $scenario startup." }
+              if ($process.MainWindowHandle -ne [IntPtr]::Zero) { break }
+            }
+            $process.Refresh()
+            if ($process.MainWindowHandle -eq [IntPtr]::Zero) { throw "Ledgerline window was not available for $scenario." }
+            [LedgerlineWindowTest]::ShowWindow($process.MainWindowHandle, 3) | Out-Null
+            [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
+            Start-Sleep -Seconds 3
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $bitmap.Save((Join-Path $evidenceDirectory ($scenario + '.png')), [System.Drawing.Imaging.ImageFormat]::Png)
+            $graphics.Dispose()
+            $bitmap.Dispose()
+            $process.CloseMainWindow() | Out-Null
+            if (-not $process.WaitForExit(10000)) { throw "Ledgerline did not close cleanly after capturing $scenario." }
+            $process.Dispose()
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: ledgerline-windows-installer
           path: installer/output/ledgerline-windows-setup.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ledgerline-ui-evidence
+          path: ui-evidence/*.png
           if-no-files-found: error
 
   publish-release:
@@ -157,9 +207,15 @@ jobs:
         with:
           name: ledgerline-windows-installer
           path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: ledgerline-ui-evidence
+          path: release-assets/ui-evidence
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
-          files: release-assets/ledgerline-windows-setup.exe
+          files: |
+            release-assets/ledgerline-windows-setup.exe
+            release-assets/ui-evidence/*.png
           generate_release_notes: true

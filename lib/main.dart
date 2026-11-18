@@ -24,6 +24,9 @@ Future<void> main() async {
       window.isMaximizable = true;
       window.isClosable = true;
       window.minimumSize = const Size(860, 600).toNative();
+      window.setSize(const Size(1440, 900).toNative(), false);
+      window.center();
+      window.show();
     }
   }
 
@@ -38,5 +41,9 @@ Future<void> main() async {
   await repository.initialize();
   final settings = await repository.loadAppSettings();
 
-  runApp(LedgerApp(repository: repository, initialSettings: settings));
+  runApp(LedgerApp(
+    repository: repository,
+    initialSettings: settings,
+    visualScenario: const String.fromEnvironment('LEDGERLINE_VISUAL_SCENARIO'),
+  ));
 }

@@ -26,11 +26,13 @@ class LedgerHomePage extends StatefulWidget {
     required this.repository,
     required this.settings,
     required this.onSettingsChanged,
+    this.visualScenario = '',
   });
 
   final LedgerRepository repository;
   final AppSettings settings;
   final Future<void> Function(AppSettings) onSettingsChanged;
+  final String visualScenario;
 
   @override
   State<LedgerHomePage> createState() => _LedgerHomePageState();
@@ -64,6 +66,22 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   @override
   void initState() {
     super.initState();
+    switch (widget.visualScenario) {
+      case 'settings-light':
+        _selectedIndex = 7;
+        _settingsSectionIndex = 0;
+      case 'settings-dark':
+        _selectedIndex = 7;
+        _settingsSectionIndex = 2;
+      case 'settings-fa':
+        _selectedIndex = 7;
+        _settingsSectionIndex = 3;
+      case 'currency-popup':
+        _selectedIndex = 7;
+        _settingsSectionIndex = 4;
+      default:
+        break;
+    }
     _snapshot = widget.repository.loadSnapshot();
     _businessNameController = TextEditingController(text: widget.settings.businessName);
     _updateService = const UpdateService();
@@ -875,7 +893,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
               onChanged: (value) {
                 if (value != null) widget.onSettingsChanged(widget.settings.copyWith(currencyCode: value));
               },
-              autoOpen: const String.fromEnvironment('LEDGERLINE_VISUAL_SCENARIO') == 'currency-popup',
+              autoOpen: widget.visualScenario == 'currency-popup',
             ),
           ],
         );

@@ -9,10 +9,12 @@ class LedgerApp extends StatefulWidget {
     super.key,
     required this.repository,
     required this.initialSettings,
+    this.visualScenario = '',
   });
 
   final LedgerRepository repository;
   final AppSettings initialSettings;
+  final String visualScenario;
 
   @override
   State<LedgerApp> createState() => _LedgerAppState();
@@ -25,6 +27,13 @@ class _LedgerAppState extends State<LedgerApp> {
   void initState() {
     super.initState();
     _settings = widget.initialSettings;
+    if (widget.visualScenario == 'settings-light') {
+      _settings = _settings.copyWith(darkMode: false);
+    } else if (widget.visualScenario == 'settings-dark') {
+      _settings = _settings.copyWith(darkMode: true);
+    } else if (widget.visualScenario == 'settings-fa') {
+      _settings = _settings.copyWith(languageCode: 'fa', darkMode: false);
+    }
   }
 
   Future<void> _saveSettings(AppSettings settings) async {
@@ -122,6 +131,7 @@ class _LedgerAppState extends State<LedgerApp> {
         repository: widget.repository,
         settings: _settings,
         onSettingsChanged: _saveSettings,
+        visualScenario: widget.visualScenario,
       ),
     );
   }
