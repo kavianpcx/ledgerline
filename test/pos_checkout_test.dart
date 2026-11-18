@@ -7,6 +7,13 @@ import 'package:ledgerline/domain/product.dart';
 import 'package:ledgerline/domain/sales_invoice.dart';
 import 'package:ledgerline/presentation/pos_page.dart';
 
+Future<void> _pumpUntil(WidgetTester tester, bool Function() condition) async {
+  for (var attempt = 0; attempt < 100 && !condition(); attempt++) {
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+  expect(condition(), isTrue, reason: 'The POS checkout did not reach the expected state.');
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -92,9 +99,12 @@ void main() {
 
     await tester.ensureVisible(find.byKey(const Key('pos-checkout')));
     await tester.tap(find.byKey(const Key('pos-checkout')));
-    await tester.pumpAndSettle();
+    await _pumpUntil(
+      tester,
+      () => find.byKey(const Key('pos-submit-checkout')).evaluate().isNotEmpty,
+    );
     await tester.tap(find.byKey(const Key('pos-submit-checkout')));
-    await tester.pumpAndSettle();
+    await _pumpUntil(tester, () => refreshCount == 1);
 
     final snapshot = await repository.loadSnapshot();
     expect(refreshCount, 1);
@@ -118,12 +128,15 @@ void main() {
     addTearDown(repository.close);
     await addTestProduct(repository);
 
+    var refreshCount = 0;
     await mountPos(
       tester,
       repository,
       const {},
       beforeCheckout: () => true,
-      onCompleted: () async {},
+      onCompleted: () async {
+        refreshCount++;
+      },
       onCartChanged: (_) {},
     );
 
@@ -131,11 +144,14 @@ void main() {
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(const Key('pos-checkout')));
     await tester.tap(find.byKey(const Key('pos-checkout')));
-    await tester.pumpAndSettle();
+    await _pumpUntil(
+      tester,
+      () => find.byKey(const Key('pos-submit-checkout')).evaluate().isNotEmpty,
+    );
     await tester.tap(find.byKey(const Key('pos-pay-cash-now')));
     await tester.pump();
     await tester.tap(find.byKey(const Key('pos-submit-checkout')));
-    await tester.pumpAndSettle();
+    await _pumpUntil(tester, () => refreshCount == 1);
 
     var invoice = (await repository.loadSnapshot()).invoices.single;
     expect(invoice.status, 'issued');
