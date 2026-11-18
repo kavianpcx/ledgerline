@@ -717,7 +717,7 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
                     key: const Key('pos-payment-method'),
-                    value: _paymentMethod,
+                    initialValue: _paymentMethod,
                     decoration: InputDecoration(
                       labelText: tr(context, 'posPaymentMethod'),
                     ),
