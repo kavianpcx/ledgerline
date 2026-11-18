@@ -9,6 +9,7 @@ Ledgerline is a Windows-first accounting desktop application. It stores the book
 - Product catalog, stock tracking, and sales invoices that post receivables, revenue, tax, cost of goods sold, and inventory together.
 - English by default, Persian with right-to-left layout, and persisted light/dark themes.
 - Smart Import with CSV preview/import and bundled offline Tesseract OCR for English and Persian.
+- Database backup export and validated restore with a retained recovery copy.
 - Windows installer and GitHub Releases built by GitHub Actions.
 
 ## Install
@@ -25,7 +26,7 @@ flutter pub get
 flutter analyze
 flutter test --reporter expanded
 flutter run -d windows
-flutter build windows --release --dart-define=APP_VERSION=0.2.1
+flutter build windows --release --dart-define=APP_VERSION=0.3.0
 ```
 
 GitHub Actions runs analysis and tests on Ubuntu and builds the Windows release on `windows-latest`. The Windows job bundles Tesseract, pinned English/Persian models, their license files, and the installer. This repository intentionally does not build Android.
@@ -37,6 +38,10 @@ Choose an image in Smart Import and Ledgerline runs the bundled Tesseract engine
 ## Local data and privacy
 
 The SQLite database is stored in the operating system's application-support directory. Journal entries, products, invoices, and preferences remain on the device. The release updater contacts GitHub only to check for a newer public release and download an installer after the user chooses to do so.
+
+## Backups
+
+Settings can export the local SQLite database or restore a Ledgerline backup. Before replacing the active books, Ledgerline checks the database integrity, required tables, foreign-key references, and journal balance. After a successful restore, the previous database is retained beside the active database as a timestamped recovery file; the app shows its path. Restoring replaces the current ledger, products, invoices, and settings.
 
 ## Updates
 

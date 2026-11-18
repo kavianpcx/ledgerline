@@ -21,10 +21,12 @@ Ledgerline is an offline-first accounting application for Windows. It uses a loc
 - Smart Import with CSV preview and review before posting.
 - Local image OCR using bundled Tesseract and English/Persian language data.
 - Windows build and installer produced through GitHub Actions.
+- SQLite backup export and validated restore; a successful restore keeps the prior database as a recovery copy.
 - Update check against public GitHub Releases; HTTPS redirects are restricted to GitHub release hosts; installer digest is checked before user approval.
 
 ## Current implementation boundaries
 
+- Restore accepts compatible Ledgerline SQLite databases and replaces the active local ledger after integrity, schema, foreign-key, and journal-balance checks. The previous database is retained as a timestamped recovery copy.
 - The initial account list and USD display are defaults.
 - Data is stored locally on a single Windows device; synchronization is not implemented.
 - OCR returns editable text for review. It does not infer a balanced journal automatically or post without user confirmation.

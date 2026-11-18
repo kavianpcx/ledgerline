@@ -1,13 +1,12 @@
 import 'dart:async';
 import 'dart:io' as io;
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../config/app_version.dart';
 import '../data/ledger_repository.dart';
-
 import '../domain/account.dart';
 import '../domain/app_settings.dart';
 import '../domain/accounting_engine.dart';
@@ -41,6 +40,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   late final UpdateService _updateService;
   bool _checkingUpdates = false;
   bool _downloadingUpdate = false;
+  bool _restoringBackup = false;
   bool _updateChecked = false;
   bool _updateCheckFailed = false;
   UpdateInfo? _availableUpdate;
@@ -76,15 +76,14 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     super.dispose();
   }
 
-
   String _updateStatus() {
-    if (_checkingUpdates) return 'Checking GitHub Releases…';
-    if (_downloadingUpdate) return 'Downloading and verifying installer…';
+    if (_checkingUpdates) return tr(context, 'checkingForUpdates');
+    if (_downloadingUpdate) return tr(context, 'verifyingUpdate');
     final update = _availableUpdate;
-    if (update != null) return 'Version ' + update.version + ' is ready.';
-    if (_updateChecked && !_updateCheckFailed) return 'You are using the latest release.';
-    if (_updateCheckFailed) return 'Could not check GitHub Releases. Check your connection and retry.';
-    return 'Current version: ' + appVersion;
+    if (update != null) return tr(context, 'updateAvailable') + ' v' + update.version;
+    if (_updateChecked && !_updateCheckFailed) return tr(context, 'upToDate');
+    if (_updateCheckFailed) return tr(context, 'updateCheckFailed');
+    return tr(context, 'updateInfo');
   }
 
   Future<void> _checkForUpdates({bool silent = false}) async {
@@ -101,7 +100,9 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         _updateChecked = true;
       });
       if (!silent) {
-        _notify(update == null ? 'Ledgerline is up to date.' : 'Version ' + update.version + ' is available.');
+        _notify(update == null
+            ? tr(context, 'upToDate')
+            : tr(context, 'updateAvailable') + ' v' + update.version);
       }
     } on Object {
       if (!mounted) return;
@@ -110,7 +111,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         _updateChecked = true;
         _updateCheckFailed = true;
       });
-      if (!silent) _notify('Could not check for updates. Check your internet connection and retry.');
+      if (!silent) _notify(tr(context, 'updateCheckFailed'));
     } finally {
       if (mounted) setState(() => _checkingUpdates = false);
     }
@@ -123,33 +124,41 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     try {
       final installer = await _updateService.downloadAndVerify(update);
       if (!mounted) return;
-      final approved = await showDialog<bool>(
+      final install = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: Text('Ledgerline ' + update.version + ' is ready'),
+          title: Text(tr(dialogContext, 'updateReady') + ' v' + update.version),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('The installer SHA-256 matches the digest published by GitHub. Review it below before opening the installer.'),
+              Text(tr(dialogContext, 'updateVerified')),
               const SizedBox(height: 12),
               SelectableText('SHA-256: ' + update.sha256, style: Theme.of(dialogContext).textTheme.bodySmall),
-              const SizedBox(height: 12),
-              const Text('This release is not Authenticode-signed, so Windows cannot verify a publisher identity.'),
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Later')),
-            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Open installer')),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(tr(dialogContext, 'cancel')),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.install_desktop_rounded),
+              label: Text(tr(dialogContext, 'installUpdate')),
+            ),
           ],
         ),
       );
-      if (approved == true) {
-        await io.Process.start(installer.path, const [], mode: io.ProcessStartMode.detached);
-        io.exit(0);
-      }
+      if (install != true || !mounted) return;
+      await io.Process.start(
+        installer.path,
+        const <String>[],
+        mode: io.ProcessStartMode.detached,
+      );
+      io.exit(0);
     } on Object catch (error) {
-      if (mounted) _notify('Could not install update: $error');
+      if (mounted) _notify(tr(context, 'updateDownloadFailed') + ': ' + error.toString());
     } finally {
       if (mounted) setState(() => _downloadingUpdate = false);
     }
@@ -271,6 +280,58 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
       if (mounted) _notify(tr(context, 'backupSaved'));
     } on Object catch (error) {
       if (mounted) _notify('${tr(context, 'errorCouldNotSave')}: $error');
+    }
+  }
+
+  Future<void> _restoreBackup() async {
+    if (_restoringBackup) return;
+    final selected = await FilePicker.platform.pickFiles(
+      dialogTitle: tr(context, 'restoreBackup'),
+      type: FileType.custom,
+      allowedExtensions: const ['sqlite', 'db'],
+    );
+    if (selected == null || selected.files.isEmpty || !mounted) return;
+    final backupPath = selected.files.single.path;
+    if (backupPath == null) {
+      _notify(tr(context, 'backupRestoreFailed'));
+      return;
+    }
+
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(tr(dialogContext, 'restoreBackup')),
+        content: Text(tr(dialogContext, 'restoreBackupWarning')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(tr(dialogContext, 'cancel')),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.restore_rounded),
+            label: Text(tr(dialogContext, 'restoreBackupConfirm')),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+
+    setState(() => _restoringBackup = true);
+    try {
+      final recoveryPath = await widget.repository.restoreBackup(backupPath);
+      final restoredSettings = await widget.repository.loadAppSettings();
+      _businessNameController.text = restoredSettings.businessName;
+      await widget.onSettingsChanged(restoredSettings);
+      await _reload();
+      if (mounted) {
+        final recoveryMessage = recoveryPath == null ? '' : '\n$recoveryPath';
+        _notify(tr(context, 'backupRestored') + recoveryMessage);
+      }
+    } on Object catch (error) {
+      if (mounted) _notify('${tr(context, 'backupRestoreFailed')}: $error');
+    } finally {
+      if (mounted) setState(() => _restoringBackup = false);
     }
   }
 
@@ -569,11 +630,20 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(tr(context, 'backupDescription')),
                   const SizedBox(height: 12),
-                  FilledButton.tonalIcon(
-                    onPressed: _exportBackup,
-                    icon: const Icon(Icons.save_alt_rounded),
-                    label: Text(tr(context, 'exportBackup')),
-                  ),
+                  Wrap(spacing: 10, runSpacing: 8, children: [
+                    FilledButton.tonalIcon(
+                      onPressed: _exportBackup,
+                      icon: const Icon(Icons.save_alt_rounded),
+                      label: Text(tr(context, 'exportBackup')),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _restoringBackup ? null : _restoreBackup,
+                      icon: _restoringBackup
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.restore_rounded),
+                      label: Text(tr(context, 'restoreBackup')),
+                    ),
+                  ]),
                   const SizedBox(height: 12),
                   Text(tr(context, 'localStorage'), style: Theme.of(context).textTheme.bodySmall),
                 ]),
@@ -582,21 +652,23 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
           ),
           const SizedBox(height: 14),
           Card(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              ListTile(
-                leading: const Icon(Icons.system_update_alt_rounded),
-                title: Text(tr(context, 'updates'), style: const TextStyle(fontWeight: FontWeight.w800)),
-                subtitle: Text(_updateStatus()),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Wrap(spacing: 10, runSpacing: 8, children: [
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.system_update_alt_rounded),
+                  title: Text(tr(context, 'updates'), style: const TextStyle(fontWeight: FontWeight.w800)),
+                  subtitle: Text(_updateStatus()),
+                ),
+                const SizedBox(height: 8),
+                Wrap(spacing: 10, runSpacing: 8, children: [
                   OutlinedButton.icon(
                     onPressed: _checkingUpdates || _downloadingUpdate ? null : () => _checkForUpdates(),
                     icon: _checkingUpdates
                         ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Icon(Icons.refresh_rounded),
-                    label: const Text('Check for updates'),
+                    label: Text(tr(context, 'checkForUpdates')),
                   ),
                   if (_availableUpdate != null)
                     FilledButton.icon(
@@ -604,11 +676,11 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                       icon: _downloadingUpdate
                           ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                           : const Icon(Icons.download_rounded),
-                      label: Text(_downloadingUpdate ? 'Verifying installer…' : 'Download and install'),
+                      label: Text(_downloadingUpdate ? tr(context, 'verifyingUpdate') : tr(context, 'downloadAndInstall')),
                     ),
                 ]),
-              ),
-            ]),
+              ]),
+            ),
           ),
         ],
       );
@@ -664,18 +736,19 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         const SizedBox(height: 6),
         Text(tr(context, 'overviewSubtitle'),
             style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 15)),
-        if (_availableUpdate != null) ...[
-          const SizedBox(height: 14),
+        const SizedBox(height: 24),
+        if (_availableUpdate != null)
           Card(
             child: ListTile(
               leading: const Icon(Icons.system_update_alt_rounded),
-              title: Text('Ledgerline ' + _availableUpdate!.version + ' is available'),
-              subtitle: const Text('Review the installer digest before opening the update.'),
-              trailing: FilledButton(onPressed: _downloadAndInstallUpdate, child: const Text('Update')),
+              title: Text(tr(context, 'updateAvailable') + ' v' + _availableUpdate!.version),
+              subtitle: Text(tr(context, 'updateVerified')),
+              trailing: FilledButton(
+                onPressed: _downloadAndInstallUpdate,
+                child: Text(tr(context, 'installUpdate')),
+              ),
             ),
           ),
-        ],
-        const SizedBox(height: 24),
         _WelcomeCard(
           entryCount: snapshot.entries.length,
           onAdd: () => _addEntry(snapshot),

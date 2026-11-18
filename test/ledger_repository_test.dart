@@ -148,4 +148,83 @@ void main() {
     addTearDown(restored.close);
     expect((await restored.handle.query('journal_entries')), hasLength(1));
   });
+
+  test('restores a validated backup and keeps the previous ledger for recovery', () async {
+    final directory = await Directory.systemTemp.createTemp('ledgerline-restore-');
+    addTearDown(() => directory.delete(recursive: true));
+    final backupPath = '${directory.path}${Platform.pathSeparator}backup.sqlite';
+    final sourceDatabase = await LedgerDatabase.openInMemory();
+    addTearDown(sourceDatabase.close);
+    final sourceRepository = LedgerRepository(sourceDatabase);
+    await sourceRepository.initialize();
+    await sourceRepository.createEntry(JournalDraft(
+      date: DateTime(2026, 4, 3),
+      description: 'Entry from backup',
+      amountCents: 7500,
+      debitAccountId: 'cash',
+      creditAccountId: 'owner-equity',
+    ));
+    await sourceRepository.saveAppSettings(const AppSettings(
+      darkMode: true,
+      languageCode: 'fa',
+      businessName: 'Backup Books',
+      currencyCode: 'EUR',
+    ));
+    await sourceRepository.exportBackup(backupPath);
+
+    final currentPath = '${directory.path}${Platform.pathSeparator}current.sqlite';
+    final currentDatabase = await LedgerDatabase.open(currentPath);
+    final currentRepository = LedgerRepository(currentDatabase);
+    addTearDown(currentRepository.close);
+    await currentRepository.initialize();
+    await currentRepository.createEntry(JournalDraft(
+      date: DateTime(2026, 4, 4),
+      description: 'Entry before restore',
+      amountCents: 2300,
+      debitAccountId: 'cash',
+      creditAccountId: 'owner-equity',
+    ));
+
+    final recoveryPath = await currentRepository.restoreBackup(backupPath);
+    expect(recoveryPath, isNotNull);
+    expect(await File(recoveryPath!).exists(), isTrue);
+    final snapshot = await currentRepository.loadSnapshot();
+    expect(snapshot.entries, hasLength(1));
+    expect(snapshot.entries.single.description, 'Entry from backup');
+    final settings = await currentRepository.loadAppSettings();
+    expect(settings.businessName, 'Backup Books');
+    expect(settings.currencyCode, 'EUR');
+    expect(settings.darkMode, isTrue);
+    expect(settings.languageCode, 'fa');
+
+    final previousDatabase = await LedgerDatabase.open(recoveryPath);
+    addTearDown(previousDatabase.close);
+    final previousEntries = await previousDatabase.handle.query('journal_entries');
+    expect(previousEntries, hasLength(1));
+    expect(previousEntries.single['description'], 'Entry before restore');
+  });
+
+  test('rejects a damaged backup without changing the current ledger', () async {
+    final directory = await Directory.systemTemp.createTemp('ledgerline-bad-restore-');
+    addTearDown(() => directory.delete(recursive: true));
+    final currentPath = '${directory.path}${Platform.pathSeparator}current.sqlite';
+    final database = await LedgerDatabase.open(currentPath);
+    final repository = LedgerRepository(database);
+    addTearDown(repository.close);
+    await repository.initialize();
+    await repository.createEntry(JournalDraft(
+      date: DateTime(2026, 4, 5),
+      description: 'Keep this entry',
+      amountCents: 3100,
+      debitAccountId: 'cash',
+      creditAccountId: 'owner-equity',
+    ));
+    final damagedFile = File('${directory.path}${Platform.pathSeparator}damaged.sqlite');
+    await damagedFile.writeAsString('This is not an SQLite database. ' * 8);
+
+    await expectLater(repository.restoreBackup(damagedFile.path), throwsFormatException);
+    final snapshot = await repository.loadSnapshot();
+    expect(snapshot.entries, hasLength(1));
+    expect(snapshot.entries.single.description, 'Keep this entry');
+  });
 }

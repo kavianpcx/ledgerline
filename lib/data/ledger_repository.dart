@@ -14,7 +14,7 @@ import 'ledger_database.dart';
 class LedgerRepository {
   LedgerRepository(this._database);
 
-  final LedgerDatabase _database;
+  LedgerDatabase _database;
 
   Future<void> initialize() async {
     final db = _database.handle;
@@ -420,6 +420,139 @@ class LedgerRepository {
     if (await file.exists()) await file.delete();
     final normalizedPath = file.absolute.path.replaceAll("'", "''");
     await _database.handle.execute("VACUUM INTO '$normalizedPath'");
+  }
+
+  Future<void> close() => _database.close();
+
+  /// Restores a validated Ledgerline SQLite backup without discarding the
+  /// current database until the replacement has passed integrity checks.
+  /// Returns the path of a recovery copy of the previous database, if one
+  /// existed.
+  Future<String?> restoreBackup(String backupPath) async {
+    if (_database.path == inMemoryDatabasePath) {
+      throw StateError('A backup cannot be restored into an in-memory ledger.');
+    }
+
+    final targetPath = p.normalize(File(_database.path).absolute.path);
+    final sourceFile = File(backupPath).absolute;
+    final sourcePath = p.normalize(sourceFile.path);
+    if (sourcePath.toLowerCase() == targetPath.toLowerCase()) {
+      throw ArgumentError('Choose a backup file other than the active database.');
+    }
+    if (!await sourceFile.exists() || await sourceFile.length() < 100) {
+      throw const FormatException('The selected file is not a valid SQLite backup.');
+    }
+
+    final targetFile = File(targetPath);
+    await targetFile.parent.create(recursive: true);
+    final stamp = DateTime.now().microsecondsSinceEpoch;
+    final stagedFile = File(p.join(targetFile.parent.path, 'ledgerline-restore-$stamp.sqlite'));
+    final recoveryFile = File(p.join(targetFile.parent.path, 'ledgerline-recovery-$stamp.sqlite'));
+    await sourceFile.copy(stagedFile.path);
+
+    LedgerDatabase? stagedDatabase;
+    var originalClosed = false;
+    var originalMoved = false;
+    try {
+      try {
+        final readOnlyDatabase = await databaseFactoryFfi.openDatabase(
+          stagedFile.path,
+          options: OpenDatabaseOptions(readOnly: true),
+        );
+        try {
+          await _validateBackupStructure(readOnlyDatabase);
+        } finally {
+          await readOnlyDatabase.close();
+        }
+        stagedDatabase = await LedgerDatabase.open(stagedFile.path);
+        await _validateBackup(stagedDatabase.handle);
+        await stagedDatabase.close();
+        stagedDatabase = null;
+      } on Object catch (error) {
+        await stagedDatabase?.close();
+        stagedDatabase = null;
+        throw FormatException('The selected file is not a valid Ledgerline backup: $error');
+      }
+
+      await _database.handle.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+      await _database.close();
+      originalClosed = true;
+
+      try {
+        if (await targetFile.exists()) {
+          await targetFile.rename(recoveryFile.path);
+          originalMoved = true;
+        }
+        await stagedFile.rename(targetPath);
+        final replacement = await LedgerDatabase.open(targetPath);
+        try {
+          await _validateBackup(replacement.handle);
+        } on Object {
+          await replacement.close();
+          rethrow;
+        }
+        _database = replacement;
+        originalClosed = false;
+        return originalMoved ? recoveryFile.path : null;
+      } on Object {
+        if (await targetFile.exists()) await targetFile.delete();
+        if (originalMoved && await recoveryFile.exists()) {
+          await recoveryFile.rename(targetPath);
+        }
+        _database = await LedgerDatabase.open(targetPath);
+        originalClosed = false;
+        rethrow;
+      }
+    } finally {
+      await stagedDatabase?.close();
+      if (await stagedFile.exists()) await stagedFile.delete();
+      if (originalClosed) _database = await LedgerDatabase.open(targetPath);
+    }
+  }
+
+  Future<void> _validateBackup(Database database) async {
+    await _validateBackupStructure(database);
+
+    final integrityRows = await database.rawQuery('PRAGMA integrity_check');
+    if (integrityRows.isEmpty ||
+        integrityRows.any((row) => row.values.first.toString().toLowerCase() != 'ok')) {
+      throw const FormatException('The backup database failed SQLite integrity checks.');
+    }
+    if ((await database.rawQuery('PRAGMA foreign_key_check')).isNotEmpty) {
+      throw const FormatException('The backup contains broken references between records.');
+    }
+
+    final unbalancedEntries = await database.rawQuery('''
+      SELECT e.id
+      FROM journal_entries e
+      LEFT JOIN journal_lines l ON l.entry_id = e.id
+      GROUP BY e.id
+      HAVING COUNT(l.id) < 2
+         OR COALESCE(SUM(l.debit_cents), 0) <> COALESCE(SUM(l.credit_cents), 0)
+      LIMIT 1
+    ''');
+    if (unbalancedEntries.isNotEmpty) {
+      throw const FormatException('The backup contains an unbalanced journal entry.');
+    }
+  }
+
+  Future<void> _validateBackupStructure(Database database) async {
+    const requiredTables = {
+      'accounts',
+      'journal_entries',
+      'journal_lines',
+      'products',
+      'sales_invoices',
+      'invoice_lines',
+      'app_settings',
+    };
+    final tableRows = await database.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+    );
+    final tableNames = tableRows.map((row) => row['name']! as String).toSet();
+    if (!tableNames.containsAll(requiredTables)) {
+      throw const FormatException('The backup does not contain a complete Ledgerline database.');
+    }
   }
 
   static const _supportedCurrencies = {'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'AED'};
