@@ -228,7 +228,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
 
   Future<void> _addEntry(LedgerSnapshot snapshot) async {
     if (!_requireAccountingCurrency()) return;
-    final draft = await showDialog<JournalDraft>
+    final draft = await showDialog<JournalDraft>(
       context: context,
       builder: (context) => _EntryDialog(
         accounts: snapshot.accounts,
@@ -269,7 +269,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
 
   Future<void> _addProduct() async {
     if (!_requireAccountingCurrency()) return;
-    final draft = await showDialog<ProductDraft>
+    final draft = await showDialog<ProductDraft>(
       context: context,
       builder: (context) => _ProductDialog(currencyCode: widget.settings.currencyCode),
     );
@@ -319,7 +319,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
 
   Future<void> _recordInvoicePayment(SalesInvoice invoice) async {
     if (!_requireAccountingCurrency()) return;
-    final draft = await showDialog<InvoicePaymentDraft>
+    final draft = await showDialog<InvoicePaymentDraft>(
       context: context,
       builder: (context) => _InvoicePaymentDialog(
         invoice: invoice,
