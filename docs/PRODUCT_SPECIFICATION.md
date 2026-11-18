@@ -17,6 +17,7 @@ Ledgerline is an offline-first accounting application for Windows. It uses a loc
 - Double-entry journal entries that must balance before saving.
 - Product catalog and inventory quantities.
 - Sales invoices that affect accounting and inventory.
+- Partial invoice payments recorded against receivables, with balanced cash entries and automatic paid status on full settlement.
 - Settings and skeleton loading states.
 - Smart Import with CSV preview and review before posting.
 - Local image OCR using bundled Tesseract and English/Persian language data.
@@ -27,6 +28,7 @@ Ledgerline is an offline-first accounting application for Windows. It uses a loc
 ## Current implementation boundaries
 
 - Restore accepts compatible Ledgerline SQLite databases and replaces the active local ledger after integrity, schema, foreign-key, and journal-balance checks. The previous database is retained as a timestamped recovery copy.
+- Invoice payment history stays local; this flow records partial receipts but does not yet support refunds or payment-method integrations.
 - The initial account list and USD display are defaults.
 - Data is stored locally on a single Windows device; synchronization is not implemented.
 - OCR returns editable text for review. It does not infer a balanced journal automatically or post without user confirmation.

@@ -19,6 +19,18 @@ class InvoiceDraft {
   final int taxCents;
 }
 
+class InvoicePaymentDraft {
+  const InvoicePaymentDraft({
+    required this.invoiceId,
+    required this.amountCents,
+    required this.date,
+  });
+
+  final String invoiceId;
+  final int amountCents;
+  final DateTime date;
+}
+
 class SalesInvoice {
   const SalesInvoice({
     required this.id,
@@ -29,6 +41,7 @@ class SalesInvoice {
     required this.subtotalCents,
     required this.taxCents,
     required this.totalCents,
+    required this.paidCents,
   });
 
   final String id;
@@ -39,15 +52,26 @@ class SalesInvoice {
   final int subtotalCents;
   final int taxCents;
   final int totalCents;
+  final int paidCents;
 
-  factory SalesInvoice.fromRow(Map<String, Object?> row) => SalesInvoice(
-        id: row['id']! as String,
-        number: row['invoice_number']! as String,
-        customerName: row['customer_name']! as String,
-        issueDate: DateTime.parse(row['issue_date']! as String),
-        status: row['status']! as String,
-        subtotalCents: row['subtotal_cents']! as int,
-        taxCents: row['tax_cents']! as int,
-        totalCents: row['total_cents']! as int,
-      );
+  int get balanceDueCents =>
+      totalCents > paidCents ? totalCents - paidCents : 0;
+
+  factory SalesInvoice.fromRow(Map<String, Object?> row) {
+    final status = row['status']! as String;
+    final totalCents = row['total_cents']! as int;
+    final paidCents = row['paid_cents'] as int? ??
+        (status == 'paid' ? totalCents : 0);
+    return SalesInvoice(
+      id: row['id']! as String,
+      number: row['invoice_number']! as String,
+      customerName: row['customer_name']! as String,
+      issueDate: DateTime.parse(row['issue_date']! as String),
+      status: status,
+      subtotalCents: row['subtotal_cents']! as int,
+      taxCents: row['tax_cents']! as int,
+      totalCents: totalCents,
+      paidCents: paidCents,
+    );
+  }
 }

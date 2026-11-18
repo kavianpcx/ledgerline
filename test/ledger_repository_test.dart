@@ -103,6 +103,124 @@ void main() {
     expect((await repository.loadSnapshot()).invoices, hasLength(1));
   });
 
+  test('records partial and final invoice payments against receivables', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.createProduct(const ProductDraft(
+      sku: 'MUG-PAY',
+      name: 'Payment test mug',
+      unitPriceCents: 10000,
+      unitCostCents: 4000,
+      stockQuantity: 3,
+    ));
+    final product = (await repository.loadProducts()).single;
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Payment customer',
+      date: DateTime(2026, 6, 1),
+      taxCents: 2000,
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 2)],
+    ));
+    var invoice = (await repository.loadSnapshot()).invoices.single;
+    expect(invoice.totalCents, 22000);
+    expect(invoice.paidCents, 0);
+    expect(invoice.balanceDueCents, 22000);
+
+    await repository.recordInvoicePayment(InvoicePaymentDraft(
+      invoiceId: invoice.id,
+      amountCents: 8000,
+      date: DateTime(2026, 6, 3),
+    ));
+    invoice = (await repository.loadSnapshot()).invoices.single;
+    expect(invoice.status, 'issued');
+    expect(invoice.paidCents, 8000);
+    expect(invoice.balanceDueCents, 14000);
+
+    await expectLater(
+      repository.recordInvoicePayment(InvoicePaymentDraft(
+        invoiceId: invoice.id,
+        amountCents: 14001,
+        date: DateTime(2026, 6, 4),
+      )),
+      throwsArgumentError,
+    );
+    invoice = (await repository.loadSnapshot()).invoices.single;
+    expect(invoice.paidCents, 8000);
+    expect(invoice.balanceDueCents, 14000);
+
+    await repository.recordInvoicePayment(InvoicePaymentDraft(
+      invoiceId: invoice.id,
+      amountCents: 14000,
+      date: DateTime(2026, 6, 5),
+    ));
+    final snapshot = await repository.loadSnapshot();
+    invoice = snapshot.invoices.single;
+    expect(invoice.status, 'paid');
+    expect(invoice.paidCents, 22000);
+    expect(invoice.balanceDueCents, 0);
+    expect(snapshot.entries, hasLength(3));
+
+    final paymentBalances = await database.handle.rawQuery('''
+      SELECT l.account_id,
+             COALESCE(SUM(l.debit_cents), 0) AS debits,
+             COALESCE(SUM(l.credit_cents), 0) AS credits
+      FROM journal_lines l
+      WHERE l.entry_id IN (
+        SELECT id FROM journal_entries WHERE description LIKE ?
+      )
+      GROUP BY l.account_id
+    ''', ['Invoice payment ${invoice.number}%']);
+    expect(paymentBalances, hasLength(2));
+    final cash = paymentBalances.singleWhere((row) => row['account_id'] == 'cash');
+    final receivables =
+        paymentBalances.singleWhere((row) => row['account_id'] == 'receivables');
+    expect(cash['debits'], 22000);
+    expect(cash['credits'], 0);
+    expect(receivables['debits'], 0);
+    expect(receivables['credits'], 22000);
+    expect(
+      snapshot.assetsCents,
+      snapshot.liabilitiesCents + snapshot.equityCents + snapshot.netIncomeCents,
+    );
+  });
+
+  test('migrates legacy paid invoices into payment history', () async {
+    final directory = await Directory.systemTemp.createTemp('ledgerline-migration-');
+    addTearDown(() => directory.delete(recursive: true));
+    final initialized = await LedgerDatabase.openInMemory();
+    await initialized.close();
+    final path = '${directory.path}${Platform.pathSeparator}legacy.sqlite';
+    final legacy = await LedgerDatabase.open(path);
+    await legacy.handle.insert('sales_invoices', {
+      'id': 'legacy-invoice',
+      'invoice_number': 'INV-2026-000001',
+      'customer_name': 'Legacy customer',
+      'issue_date': '2026-01-02',
+      'status': 'paid',
+      'subtotal_cents': 5000,
+      'tax_cents': 0,
+      'total_cents': 5000,
+      'created_at': '2026-01-02T12:00:00Z',
+    });
+    await legacy.handle.execute('DROP TABLE invoice_payments');
+    await legacy.handle.execute('PRAGMA user_version = 2');
+    await legacy.close();
+
+    final migrated = await LedgerDatabase.open(path);
+    addTearDown(migrated.close);
+    final repository = LedgerRepository(migrated);
+    await repository.initialize();
+    final invoice = (await repository.loadSnapshot()).invoices.single;
+    expect(invoice.status, 'paid');
+    expect(invoice.paidCents, 5000);
+    expect(invoice.balanceDueCents, 0);
+    final payments = await migrated.handle.query('invoice_payments');
+    expect(payments, hasLength(1));
+    expect(payments.single['payment_date'], '2026-01-02');
+    expect(payments.single['amount_cents'], 5000);
+  });
+
   test('persists the theme and locale settings', () async {
     final database = await LedgerDatabase.openInMemory();
     addTearDown(database.close);

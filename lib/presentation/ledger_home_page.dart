@@ -256,6 +256,25 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     }
   }
 
+  Future<void> _recordInvoicePayment(SalesInvoice invoice) async {
+    final draft = await showDialog<InvoicePaymentDraft>(
+      context: context,
+      builder: (context) => _InvoicePaymentDialog(
+        invoice: invoice,
+        currencyCode: widget.settings.currencyCode,
+      ),
+    );
+    if (draft == null || !mounted) return;
+    try {
+      await widget.repository.recordInvoicePayment(draft);
+      await _reload();
+      if (mounted) _notify(tr(context, 'paymentSaved'));
+    } on Object catch (error) {
+      if (mounted) _notify('${tr(context, 'paymentFailed')}: $error');
+    }
+  }
+
+
   void _notify(String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
@@ -527,17 +546,46 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
           if (snapshot.invoices.isEmpty)
             Card(child: Padding(padding: const EdgeInsets.all(24), child: Center(child: Text(tr(context, 'noInvoices')))))
           else
-            for (final invoice in snapshot.invoices)
-              Card(
-                child: ListTile(
-                  leading: const CircleAvatar(child: Icon(Icons.request_quote_outlined)),
-                  title: Text('${invoice.number} · ${invoice.customerName}', style: const TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: Text('${_shortDate(context, invoice.issueDate)} · ${tr(context, invoice.status)}'),
-                  trailing: Text(_money(invoice.totalCents, widget.settings.currencyCode), style: const TextStyle(fontWeight: FontWeight.w800)),
-                ),
-              ),
+            for (final invoice in snapshot.invoices) _invoiceCard(invoice),
         ],
       );
+
+  Widget _invoiceCard(SalesInvoice invoice) {
+    final partial = invoice.status == 'issued' &&
+        invoice.paidCents > 0 &&
+        invoice.balanceDueCents > 0;
+    final status = partial
+        ? tr(context, 'partiallyPaid')
+        : tr(context, invoice.status);
+    return Card(
+      child: Column(
+        children: [
+          ListTile(
+            leading: const CircleAvatar(child: Icon(Icons.request_quote_outlined)),
+            title: Text('${invoice.number} · ${invoice.customerName}', style: const TextStyle(fontWeight: FontWeight.w700)),
+            subtitle: Text(
+              '${_shortDate(context, invoice.issueDate)} · $status\n'
+              '${tr(context, 'paidAmount')}: ${_money(invoice.paidCents, widget.settings.currencyCode)} · '
+              '${tr(context, 'balanceDue')}: ${_money(invoice.balanceDueCents, widget.settings.currencyCode)}',
+            ),
+            trailing: Text(_money(invoice.totalCents, widget.settings.currencyCode), style: const TextStyle(fontWeight: FontWeight.w800)),
+          ),
+          if (invoice.status == 'issued' && invoice.balanceDueCents > 0)
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: Padding(
+                padding: const EdgeInsetsDirectional.only(end: 12, bottom: 8),
+                child: FilledButton.tonalIcon(
+                  onPressed: () => _recordInvoicePayment(invoice),
+                  icon: const Icon(Icons.payments_outlined),
+                  label: Text(tr(context, 'recordPayment')),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _settingsPage() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1269,6 +1317,125 @@ class _InvoiceDialogState extends State<_InvoiceDialog> {
             InvoiceLineDraft(productId: line.productId!, quantity: int.parse(line.quantity.text)),
         ],
         taxCents: _EntryDialogState._parseCents(_tax.text)!,
+      ),
+    );
+  }
+}
+
+class _InvoicePaymentDialog extends StatefulWidget {
+  const _InvoicePaymentDialog({
+    required this.invoice,
+    required this.currencyCode,
+  });
+
+  final SalesInvoice invoice;
+  final String currencyCode;
+
+  @override
+  State<_InvoicePaymentDialog> createState() => _InvoicePaymentDialogState();
+}
+
+class _InvoicePaymentDialogState extends State<_InvoicePaymentDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _amount;
+  DateTime _paymentDate = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _amount = TextEditingController(
+      text: (widget.invoice.balanceDueCents / 100).toStringAsFixed(2),
+    );
+  }
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text(tr(context, 'invoicePaymentTitle')),
+        content: SizedBox(
+          width: 380,
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${widget.invoice.number} · ${widget.invoice.customerName}'),
+                const SizedBox(height: 8),
+                Text(
+                  '${tr(context, 'balanceDue')}: '
+                  '${_money(widget.invoice.balanceDueCents, widget.currencyCode)}',
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _amount,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: tr(context, 'paymentAmount'),
+                    prefixText: '${widget.currencyCode} ',
+                  ),
+                  validator: (value) {
+                    final amountCents =
+                        _EntryDialogState._parseCents(value ?? '');
+                    if (amountCents == null || amountCents <= 0) {
+                      return tr(context, 'paymentAmountError');
+                    }
+                    if (amountCents > widget.invoice.balanceDueCents) {
+                      return tr(context, 'paymentExceedsBalance');
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: () async {
+                    final selected = await showDatePicker(
+                      context: context,
+                      initialDate: _paymentDate,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime(2100),
+                    );
+                    if (selected != null && mounted) {
+                      setState(() => _paymentDate = selected);
+                    }
+                  },
+                  icon: const Icon(Icons.calendar_today_outlined),
+                  label: Text(
+                    '${tr(context, 'paymentDate')}: '
+                    '${MaterialLocalizations.of(context).formatMediumDate(_paymentDate)}',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(tr(context, 'cancel')),
+          ),
+          FilledButton.icon(
+            onPressed: _save,
+            icon: const Icon(Icons.check_rounded),
+            label: Text(tr(context, 'savePayment')),
+          ),
+        ],
+      );
+
+  void _save() {
+    if (!_formKey.currentState!.validate()) return;
+    Navigator.pop(
+      context,
+      InvoicePaymentDraft(
+        invoiceId: widget.invoice.id,
+        amountCents: _EntryDialogState._parseCents(_amount.text)!,
+        date: _paymentDate,
       ),
     );
   }

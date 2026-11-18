@@ -6,7 +6,7 @@ Ledgerline is a Windows-first accounting desktop application. It stores the book
 
 - Dashboard, chart of accounts, journal, income statement, and balance summary.
 - Balanced journal entries saved in atomic SQLite transactions.
-- Product catalog, stock tracking, and sales invoices that post receivables, revenue, tax, cost of goods sold, and inventory together.
+- Product catalog and stock tracking. Sales invoices post receivables, revenue, tax, cost of goods sold, and inventory together; partial payments post balanced cash and receivable entries.
 - English by default, Persian with right-to-left layout, and persisted light/dark themes.
 - Smart Import with CSV preview/import and bundled offline Tesseract OCR for English and Persian.
 - Database backup export and validated restore with a retained recovery copy.
@@ -26,7 +26,7 @@ flutter pub get
 flutter analyze
 flutter test --reporter expanded
 flutter run -d windows
-flutter build windows --release --dart-define=APP_VERSION=0.3.1
+flutter build windows --release --dart-define=APP_VERSION=0.4.0
 ```
 
 GitHub Actions runs analysis and tests on Ubuntu and builds the Windows release on `windows-latest`. The Windows job bundles Tesseract, pinned English/Persian models, their license files, and the installer. This repository intentionally does not build Android.

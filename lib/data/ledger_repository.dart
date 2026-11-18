@@ -104,11 +104,14 @@ class LedgerRepository {
     final entries = entryRows.map(LedgerEntry.fromRow).toList(growable: false);
     final productRows = await db.query('products', orderBy: 'name COLLATE NOCASE ASC');
     final products = productRows.map(Product.fromRow).toList(growable: false);
-    final invoiceRows = await db.query(
-      'sales_invoices',
-      orderBy: 'issue_date DESC, created_at DESC',
-      limit: 200,
-    );
+    final invoiceRows = await db.rawQuery('''
+      SELECT i.*, COALESCE(SUM(p.amount_cents), 0) AS paid_cents
+      FROM sales_invoices i
+      LEFT JOIN invoice_payments p ON p.invoice_id = i.id
+      GROUP BY i.id
+      ORDER BY i.issue_date DESC, i.created_at DESC
+      LIMIT 200
+    ''');
     final invoices = invoiceRows.map(SalesInvoice.fromRow).toList(growable: false);
 
     return AccountingEngine.summarize(
@@ -369,6 +372,68 @@ class LedgerRepository {
     });
   }
 
+  Future<void> recordInvoicePayment(InvoicePaymentDraft draft) async {
+    if (draft.amountCents <= 0) {
+      throw ArgumentError('Payment amount must be greater than zero.');
+    }
+
+    await _database.handle.transaction((txn) async {
+      final invoiceRows = await txn.query(
+        'sales_invoices',
+        where: 'id = ?',
+        whereArgs: [draft.invoiceId],
+        limit: 1,
+      );
+      if (invoiceRows.isEmpty) {
+        throw ArgumentError('The invoice no longer exists.');
+      }
+      final invoice = invoiceRows.single;
+      if (invoice['status'] == 'void') {
+        throw ArgumentError('A void invoice cannot receive a payment.');
+      }
+      final totalCents = invoice['total_cents']! as int;
+      final paidRows = await txn.rawQuery(
+        'SELECT COALESCE(SUM(amount_cents), 0) AS paid_cents FROM invoice_payments WHERE invoice_id = ?',
+        [draft.invoiceId],
+      );
+      final alreadyPaidCents = paidRows.single['paid_cents']! as int;
+      final balanceDueCents = totalCents - alreadyPaidCents;
+      if (balanceDueCents <= 0 || draft.amountCents > balanceDueCents) {
+        throw ArgumentError('Payment exceeds the invoice balance due.');
+      }
+
+      final newPaidCents = alreadyPaidCents + draft.amountCents;
+      final createdAt = DateTime.now().toUtc().toIso8601String();
+      await txn.insert('invoice_payments', {
+        'id': 'payment_${draft.invoiceId}_$newPaidCents',
+        'invoice_id': draft.invoiceId,
+        'payment_date': _dateOnly(draft.date),
+        'amount_cents': draft.amountCents,
+        'created_at': createdAt,
+      });
+      await _insertBalancedEntry(
+        txn,
+        JournalDraft(
+          date: draft.date,
+          description: 'Invoice payment ${invoice['invoice_number']} · ${invoice['customer_name']}',
+          amountCents: draft.amountCents,
+          debitAccountId: 'cash',
+          creditAccountId: 'receivables',
+        ),
+      );
+      final updated = await txn.update(
+        'sales_invoices',
+        {'status': newPaidCents == totalCents ? 'paid' : 'issued'},
+        where: 'id = ? AND status != ?',
+        whereArgs: [draft.invoiceId, 'void'],
+      );
+      if (updated != 1) {
+        throw StateError('The invoice status changed while recording payment.');
+      }
+    });
+  }
+
+
   Future<AppSettings> loadAppSettings() async {
     final rows = await _database.handle.query('app_settings');
     final values = {
@@ -461,7 +526,7 @@ class LedgerRepository {
           options: OpenDatabaseOptions(readOnly: true),
         );
         try {
-          await _validateBackupStructure(readOnlyDatabase);
+          await _validateBackupStructure(readOnlyDatabase, allowLegacySchema: true);
         } finally {
           await readOnlyDatabase.close();
         }
@@ -538,8 +603,11 @@ class LedgerRepository {
     }
   }
 
-  Future<void> _validateBackupStructure(Database database) async {
-    const requiredTables = {
+  Future<void> _validateBackupStructure(
+    Database database, {
+    bool allowLegacySchema = false,
+  }) async {
+    final requiredTables = <String>{
       'accounts',
       'journal_entries',
       'journal_lines',
@@ -548,6 +616,7 @@ class LedgerRepository {
       'invoice_lines',
       'app_settings',
     };
+    if (!allowLegacySchema) requiredTables.add('invoice_payments');
     final tableRows = await database.rawQuery(
       "SELECT name FROM sqlite_master WHERE type = 'table'",
     );

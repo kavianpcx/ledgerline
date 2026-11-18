@@ -12,7 +12,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 2,
+        version: 3,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -28,7 +28,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       inMemoryDatabasePath,
       options: OpenDatabaseOptions(
-        version: 2,
+        version: 3,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -76,6 +76,7 @@ class LedgerDatabase {
       'CREATE INDEX journal_lines_by_account ON journal_lines(account_id)',
     );
     await _createProductInvoiceAndSettingsTables(db);
+    await _createInvoicePaymentsTable(db);
   }
 
   static Future<void> _upgradeSchema(
@@ -85,6 +86,9 @@ class LedgerDatabase {
   ) async {
     if (oldVersion < 2) {
       await _createProductInvoiceAndSettingsTables(db);
+    }
+    if (oldVersion < 3) {
+      await _createInvoicePaymentsTable(db);
     }
   }
 
@@ -135,4 +139,28 @@ class LedgerDatabase {
       'CREATE INDEX invoices_by_date ON sales_invoices(issue_date DESC)',
     );
   }
+  
+  static Future<void> _createInvoicePaymentsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE invoice_payments (
+        id TEXT PRIMARY KEY,
+        invoice_id TEXT NOT NULL REFERENCES sales_invoices(id) ON DELETE CASCADE,
+        payment_date TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX invoice_payments_by_invoice ON invoice_payments(invoice_id, payment_date DESC)',
+    );
+    await db.execute('''
+      INSERT INTO invoice_payments (
+        id, invoice_id, payment_date, amount_cents, created_at
+      )
+      SELECT 'legacy-paid-' || id, id, issue_date, total_cents, created_at
+      FROM sales_invoices
+      WHERE status = 'paid' AND total_cents > 0
+    ''');
+  }
+
 }
