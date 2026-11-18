@@ -11,6 +11,8 @@
 - Add database-backed product search, sorting, and pagination for 10/25/50/100 rows per page.
 - Add product editing that preserves historical invoice line values and posts inventory valuation changes when on-hand stock cost changes.
 - Add migration, catalog paging, invoice history, and 10,000-product tests.
+- Add RFC 4180-style CSV parsing for product catalogs, automatic English/Persian column suggestions, editable mapping, row validation, and duplicate checks.
+- Import approved products and opening stock in one SQLite transaction with balanced inventory/equity journal entries; add parser, rollback, accounting, and 10,000-row coverage.
 
 
 ## 0.5.1-beta.1
