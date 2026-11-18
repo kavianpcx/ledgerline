@@ -447,6 +447,7 @@ class LedgerRepository {
       currencyCode: _supportedCurrencies.contains(values['currency_code'])
           ? values['currency_code']!
           : 'USD',
+      desktopSidebarCollapsed: values['desktop_sidebar_collapsed'] == 'true',
     );
   }
 
@@ -471,6 +472,11 @@ class LedgerRepository {
       await batch.insert(
         'app_settings',
         {'setting_key': 'currency_code', 'setting_value': settings.currencyCode},
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      await batch.insert(
+        'app_settings',
+        {'setting_key': 'desktop_sidebar_collapsed', 'setting_value': '${settings.desktopSidebarCollapsed}'},
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     });

@@ -7,6 +7,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'navigation_presentation.dart';
+import 'widgets/desktop_sidebar.dart';
+
 import '../config/app_version.dart';
 import '../data/ledger_repository.dart';
 import '../domain/account.dart';
@@ -50,6 +53,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   bool _updateChecked = false;
   bool _updateCheckFailed = false;
   UpdateInfo? _availableUpdate;
+  bool _sidebarExpandedAtMediumWidth = false;
 
   static const _destinations = <(String, IconData, IconData)>[
     ('overview', Icons.grid_view_rounded, Icons.grid_view_outlined),
@@ -410,8 +414,24 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 900;
+        final isWindowsDesktop = io.Platform.isWindows;
+        final navigationPresentation = navigationPresentationFor(
+          windowsDesktop: isWindowsDesktop,
+          availableWidth: constraints.maxWidth,
+        );
+        final isWide = navigationPresentation != LedgerNavigationPresentation.mobileBottomBar;
         final isCompact = constraints.maxWidth < 640;
+        final sidebarExpanded = isWindowsDesktop && desktopSidebarExpandedFor(
+          availableWidth: constraints.maxWidth,
+          collapsedPreference: widget.settings.desktopSidebarCollapsed,
+          expandedAtMediumWidth: _sidebarExpandedAtMediumWidth,
+        );
+        final navigationWidth = navigationPresentation == LedgerNavigationPresentation.windowsSidebar
+            ? (sidebarExpanded ? 252.0 : 76.0)
+            : navigationPresentation == LedgerNavigationPresentation.tabletRail
+                ? 80.0
+                : 0.0;
+        final contentWidth = (constraints.maxWidth - navigationWidth).clamp(0.0, constraints.maxWidth).toDouble();
         final navIndex = switch (_selectedIndex) {
           0 => 0,
           1 => 1,
@@ -427,66 +447,33 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                     child: WindowCaption(
                       brightness: Theme.of(context).brightness,
                       title: SizedBox(
-                        height: 56,
-                        child: Row(
-                          children: [
-                            const SizedBox(width: 14),
-                            Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFE0F2EE),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Icon(Icons.account_balance_wallet_rounded,
-                                  color: Color(0xFF087E78), size: 18),
+                      height: 56,
+                      child: Row(
+                        textDirection: TextDirection.ltr,
+                        children: [
+                          const SizedBox(width: 14),
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE0F2EE),
+                              borderRadius: BorderRadius.circular(10),
                             ),
-                            const SizedBox(width: 9),
-                            Text(tr(context, 'appName'),
-                                style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.3)),
-                            const SizedBox(width: 18),
-                            for (var index = 0; index < _destinations.length; index++)
-                              Tooltip(
-                                message: tr(context, _destinations[index].$1),
-                                child: IconButton(
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: const BoxConstraints.tightFor(width: 38, height: 38),
-                                  padding: EdgeInsets.zero,
-                                  onPressed: () => setState(() => _selectedIndex = index),
-                                  style: IconButton.styleFrom(
-                                    foregroundColor: _selectedIndex == index
-                                        ? Theme.of(context).colorScheme.primary
-                                        : Theme.of(context).colorScheme.onSurfaceVariant,
-                                    backgroundColor: _selectedIndex == index
-                                        ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.65)
-                                        : Colors.transparent,
-                                  ),
-                                  icon: Icon(_selectedIndex == index
-                                      ? _destinations[index].$2
-                                      : _destinations[index].$3, size: 19),
-                                ),
-                              ),
-                            const Spacer(),
-                            if (_selectedIndex == 0 || _selectedIndex == 1)
-                              FutureBuilder<LedgerSnapshot>(
-                                future: _snapshot,
-                                builder: (context, result) => IconButton.filled(
-                                  tooltip: tr(context, 'newEntry'),
-                                  onPressed: result.data == null ? null : () => _addEntry(result.data!),
-                                  icon: const Icon(Icons.add_rounded, size: 19),
-                                  style: IconButton.styleFrom(
-                                    backgroundColor: const Color(0xFF087E78),
-                                    foregroundColor: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            const SizedBox(width: 8),
-                          ],
-                        ),
+                            child: const Icon(Icons.account_balance_wallet_rounded,
+                                color: Color(0xFF087E78), size: 18),
+                          ),
+                          const SizedBox(width: 9),
+                          Text(
+                            tr(context, 'appName'),
+                            style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.3),
+                          ),
+                          const Spacer(),
+                        ],
                       ),
                     ),
                   ),
-                )
+                ),
+              )
               : AppBar(
                   titleSpacing: isWide ? 32 : 20,
                   title: Row(
@@ -508,7 +495,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                     ],
                   ),
                   actions: [
-                    if (_selectedIndex == 0 || _selectedIndex == 1)
+                    if (!isWindowsDesktop && (_selectedIndex == 0 || _selectedIndex == 1))
                       FutureBuilder<LedgerSnapshot>(
                         future: _snapshot,
                         builder: (context, result) => Padding(
@@ -528,8 +515,23 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                   ],
                 ),
           body: Row(
+            textDirection: isWindowsDesktop ? TextDirection.ltr : null,
             children: [
-              if (isWide && !io.Platform.isWindows)
+              if (navigationPresentation == LedgerNavigationPresentation.windowsSidebar)
+                LedgerDesktopSidebar(
+                  destinations: _destinations,
+                  selectedIndex: _selectedIndex,
+                  collapsed: !sidebarExpanded,
+                  canToggleExpanded: constraints.maxWidth >= 760,
+                  onDestinationSelected: (index) => setState(() => _selectedIndex = index),
+                  onCollapsedChanged: (collapsed) {
+                    setState(() => _sidebarExpandedAtMediumWidth = !collapsed);
+                    unawaited(widget.onSettingsChanged(
+                      widget.settings.copyWith(desktopSidebarCollapsed: collapsed),
+                    ));
+                  },
+                ),
+              if (navigationPresentation == LedgerNavigationPresentation.tabletRail)
                 NavigationRail(
                   selectedIndex: _selectedIndex,
                   onDestinationSelected: (index) => setState(() => _selectedIndex = index),
@@ -558,16 +560,16 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                     final snapshot = result.data!;
                     return RefreshIndicator(
                       onRefresh: _reload,
-                      child: _page(snapshot, constraints.maxWidth),
+                      child: _page(snapshot, contentWidth),
                     );
                   },
                 ),
               ),
             ],
           ),
-          bottomNavigationBar: isWide
-              ? null
-              : NavigationBar(
+          bottomNavigationBar: navigationPresentation == LedgerNavigationPresentation.mobileBottomBar
+              ? NavigationBar(
+                  key: const Key('ledgerline-bottom-navigation'),
                   selectedIndex: navIndex,
                   onDestinationSelected: (index) => setState(() {
                     _selectedIndex = switch (index) { 0 => 0, 1 => 1, 2 => 4, _ => 8 };
@@ -580,7 +582,8 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                         label: tr(context, _destinations[index].$1),
                       ),
                   ],
-                ),
+                )
+              : null,
         );
         if (!io.Platform.isWindows) return scaffold;
         return DragToResizeArea(child: scaffold);
@@ -591,7 +594,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   Widget _page(LedgerSnapshot snapshot, double availableWidth) {
     final maxWidth = availableWidth >= 900 ? 1200.0 : 760.0;
     final content = switch (_selectedIndex) {
-      0 => _overview(snapshot),
+      0 => _overview(snapshot, availableWidth),
       1 => _entries(snapshot),
       2 => _accounts(snapshot),
       3 => _products(snapshot),
@@ -1091,8 +1094,8 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         ],
       );
 
-  Widget _overview(LedgerSnapshot snapshot) {
-    final width = MediaQuery.sizeOf(context).width;
+  Widget _overview(LedgerSnapshot snapshot, double availableWidth) {
+    final width = availableWidth;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1148,7 +1151,16 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
           const SizedBox(height: 6),
           Text(tr(context, 'journalHint'),
               style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: FilledButton.icon(
+              onPressed: () => _addEntry(snapshot),
+              icon: const Icon(Icons.add_rounded),
+              label: Text(tr(context, 'newEntry')),
+            ),
+          ),
+          const SizedBox(height: 18),
           _EntryList(entries: snapshot.entries, emptyMessage: tr(context, 'noEntries'), currencyCode: widget.settings.currencyCode),
         ],
       );
