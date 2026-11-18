@@ -67,6 +67,41 @@ void main() {
     expect(popupRect.height, lessThanOrEqualTo(320));
   });
 
+  testWidgets('autoOpen displays the popup on first render', (tester) async {
+    tester.view.physicalSize = const Size(640, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Padding(
+          padding: const EdgeInsets.all(24),
+          child: SearchableSelect<String>(
+            id: 'auto-open',
+            label: 'Currency',
+            searchHint: 'Search currencies',
+            emptyLabel: 'No currencies',
+            options: const [
+              SearchableSelectOption(value: 'USD', label: 'USD · US Dollar'),
+              SearchableSelectOption(value: 'EUR', label: 'EUR · Euro'),
+            ],
+            value: 'USD',
+            onChanged: (_) {},
+            autoOpen: true,
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('searchable-select-popup-auto-open')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('keyboard selection commits the highlighted option', (tester) async {
     tester.view.physicalSize = const Size(700, 500);
     tester.view.devicePixelRatio = 1;
