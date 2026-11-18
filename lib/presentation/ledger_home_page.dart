@@ -103,7 +103,6 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     _businessNameController = TextEditingController(text: widget.settings.businessName);
     _productSearchController = TextEditingController();
     _productSearchController.addListener(_onProductSearchChanged);
-    _productPageFuture = _loadProductPage();
     _updateService = const UpdateService();
     if (kReleaseMode) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -261,7 +260,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   Future<void> _reload() async {
     setState(() {
       _snapshot = widget.repository.loadSnapshot();
-      _refreshProductPage();
+      if (_productPageFuture != null) _refreshProductPage();
     });
     await _snapshot;
     final productPage = _productPageFuture;
