@@ -45,6 +45,7 @@ void main() {
     expect(popupRect.height, lessThanOrEqualTo(320));
     expect(popupRect.left, greaterThanOrEqualTo(0));
     expect(popupRect.right, lessThanOrEqualTo(800));
+    expect(popupRect.width, lessThanOrEqualTo(480));
     expect(find.text('Currency option 0'), findsWidgets);
 
     await tester.drag(

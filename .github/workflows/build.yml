@@ -38,6 +38,7 @@ jobs:
           - test/widget_test.dart
           - test/update_service_test.dart
           - test/searchable_select_test.dart
+          - test/settings_control_center_test.dart
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux window dependencies

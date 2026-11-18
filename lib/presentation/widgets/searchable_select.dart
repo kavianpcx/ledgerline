@@ -27,6 +27,7 @@ class SearchableSelect<T> extends StatefulWidget {
     required this.onChanged,
     this.enabled = true,
     this.maxPopupHeight = 304,
+    this.maxPopupWidth = 480,
     this.autoOpen = false,
   });
 
@@ -39,6 +40,7 @@ class SearchableSelect<T> extends StatefulWidget {
   final ValueChanged<T?> onChanged;
   final bool enabled;
   final double maxPopupHeight;
+  final double maxPopupWidth;
   final bool autoOpen;
 
   @override
@@ -117,9 +119,10 @@ class _SearchableSelectState<T> extends State<SearchableSelect<T>> {
       math.max(104.0, availableSpace - 8),
     );
 
+    final viewportPopupWidth = math.max(120.0, viewport.width - 24);
     _popupWidth = math.min(
       math.max(size.width, 260.0),
-      math.max(120.0, viewport.width - 24),
+      math.min(widget.maxPopupWidth, viewportPopupWidth),
     );
     final targetRight = origin.dx + size.width;
     final wantedLeft = direction == TextDirection.rtl
