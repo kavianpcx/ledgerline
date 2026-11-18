@@ -157,6 +157,8 @@ jobs:
           public static class LedgerlineWindowTest {
             [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr handle);
             [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr handle, int command);
+            [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr handle);
+            [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr handle);
           }
           "@
           $smokeInstallDirectory = Join-Path $env:RUNNER_TEMP 'LedgerlineInstallerSmoke'
@@ -197,7 +199,23 @@ jobs:
             }
             $process.Refresh()
             if ($process.MainWindowHandle -eq [IntPtr]::Zero) { throw "Ledgerline window was not available for $scenario." }
+            [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
+            if ($scenario -eq 'titlebar') {
+              [System.Windows.Forms.SendKeys]::SendWait('^+f')
+              Start-Sleep -Seconds 1
+              if (-not [LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { throw 'Ctrl+Shift+F did not maximize the Ledgerline window.' }
+              [System.Windows.Forms.SendKeys]::SendWait('^+f')
+              Start-Sleep -Seconds 1
+              if ([LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { throw 'Ctrl+Shift+F did not restore the Ledgerline window.' }
+              [System.Windows.Forms.SendKeys]::SendWait('^+m')
+              Start-Sleep -Seconds 1
+              if (-not [LedgerlineWindowTest]::IsIconic($process.MainWindowHandle)) { throw 'Ctrl+Shift+M did not minimize the Ledgerline window.' }
+              [LedgerlineWindowTest]::ShowWindow($process.MainWindowHandle, 9) | Out-Null
+              Start-Sleep -Seconds 1
+              if ([LedgerlineWindowTest]::IsIconic($process.MainWindowHandle)) { throw 'The Ledgerline window did not restore after minimizing.' }
+            }
             [LedgerlineWindowTest]::ShowWindow($process.MainWindowHandle, 3) | Out-Null
+            if (-not [LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { throw "The Windows caption could not maximize the window for $scenario." }
             [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
             Start-Sleep -Seconds 3
             $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
