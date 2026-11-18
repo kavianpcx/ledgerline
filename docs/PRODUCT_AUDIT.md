@@ -6,9 +6,9 @@ This audit compares the current GitHub source with `docs/PRODUCT_SPECIFICATION.m
 
 Current `main` is `ab615a02f369155fbd5ad44ab170f0a3c7c4005a`. PRs #2 through #5 are merged: Windows sidebar repair, currency safeguards, editable/paginated catalog, and reviewed product CSV import. The main push workflow [run 44371927172](https://github.com/kavianpcx/ledgerline/actions/runs/44371927172) completed successfully, including analysis, the test matrix, and Windows packaging/smoke checks.
 
-Open PR #6, `feature/pos-checkout`, is based on that main commit. Its previous head `2b44cbf47cc8000635087e66af48dc41876a52d3` passed [workflow run 44380788797](https://github.com/kavianpcx/ledgerline/actions/runs/44380788797): Windows build and installer smoke, analysis, and all ten test-file jobs passed. The release-publish job was skipped for the pull-request event. The stock-history changes in the current PR head require a fresh workflow run; the older run does not verify them.
+Open PR #6, `feature/pos-checkout`, is based on that main commit. Current head `f4f38dbdcde134410bcbe425fbe9731386d643e3` passed [workflow run 44410714430](https://github.com/kavianpcx/ledgerline/actions/runs/44410714430): analysis, all ten test-file jobs, Windows release build and installer smoke, eight automated UI scenarios, and artifact uploads passed. The release-publish job is skipped for the pull-request event.
 
-CI has captured Windows screenshots at wide, medium, and narrow sizes, but their pixels have not been manually reviewed here. High-DPI, resize-edge, drag, and Snap behavior remain unverified. This environment has no Flutter/Dart SDK and terminal DNS cannot reach GitHub; GitHub Actions is the available build/test path.
+The Windows CI screenshots cover the title bar, sidebar at wide/medium/narrow sizes, settings themes/languages, and currency popup. Their pixels have not been manually reviewed here. High-DPI, resize-edge, drag, and Snap behavior remain unverified. This environment has no Flutter/Dart SDK and terminal DNS cannot reach GitHub; GitHub Actions is the available build/test path.
 
 ## What works on main
 
