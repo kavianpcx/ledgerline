@@ -897,7 +897,6 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
               searchHint: tr(context, 'searchCurrencies'),
               emptyLabel: tr(context, 'noSearchResults'),
               value: widget.settings.currencyCode,
-              autoOpen: widget.visualScenario == 'currency-popup',
               options: const [
                 SearchableSelectOption(value: 'USD', label: 'USD · US Dollar'),
                 SearchableSelectOption(value: 'EUR', label: 'EUR · Euro'),
