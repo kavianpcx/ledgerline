@@ -223,7 +223,7 @@ class _LedgerDesktopSidebarState extends State<LedgerDesktopSidebar> {
                 mainAxisAlignment: collapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
                 children: [
                   SizedBox(
-                    width: collapsed ? 56 : 46,
+                    width: collapsed ? 48 : 46,
                     child: Icon(
                       selected ? destination.$2 : destination.$3,
                       size: 20,
