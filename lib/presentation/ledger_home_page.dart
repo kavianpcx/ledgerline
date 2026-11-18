@@ -70,15 +70,19 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
       case 'settings-light':
         _selectedIndex = 7;
         _settingsSectionIndex = 0;
+        break;
       case 'settings-dark':
         _selectedIndex = 7;
         _settingsSectionIndex = 2;
+        break;
       case 'settings-fa':
         _selectedIndex = 7;
         _settingsSectionIndex = 3;
+        break;
       case 'currency-popup':
         _selectedIndex = 7;
         _settingsSectionIndex = 4;
+        break;
       default:
         break;
     }
