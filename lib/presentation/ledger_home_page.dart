@@ -522,6 +522,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                   destinations: _destinations,
                   selectedIndex: _selectedIndex,
                   collapsed: !sidebarExpanded,
+                  canToggleExpanded: constraints.maxWidth >= 760,
                   onDestinationSelected: (index) => setState(() => _selectedIndex = index),
                   onCollapsedChanged: (collapsed) {
                     setState(() => _sidebarExpandedAtMediumWidth = !collapsed);
