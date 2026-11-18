@@ -98,22 +98,47 @@ class LedgerDatabase {
 
 
   static Future<void> _upgradeProductsToV4(Database db) async {
-    await db.execute("ALTER TABLE products ADD COLUMN description TEXT NOT NULL DEFAULT ''");
-    await db.execute("ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT ''");
-    await db.execute("ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAULT ''");
-    await db.execute("ALTER TABLE products ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''");
+    final columnRows = await db.rawQuery('PRAGMA table_info(products)');
+    final columns = {
+      for (final row in columnRows) row['name']! as String,
+    };
+    if (!columns.contains('description')) {
+      await db.execute("ALTER TABLE products ADD COLUMN description TEXT NOT NULL DEFAULT ''");
+    }
+    if (!columns.contains('category')) {
+      await db.execute("ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT ''");
+    }
+    if (!columns.contains('barcode')) {
+      await db.execute("ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAULT ''");
+    }
+    if (!columns.contains('updated_at')) {
+      await db.execute("ALTER TABLE products ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''");
+    }
     await db.execute(
       "UPDATE products SET updated_at = created_at WHERE updated_at = ''",
     );
-    await db.execute(
-      'CREATE INDEX products_by_name ON products(name COLLATE NOCASE, id)',
+
+    final indexRows = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'products'",
     );
-    await db.execute(
-      'CREATE INDEX products_by_category ON products(category COLLATE NOCASE, id)',
-    );
-    await db.execute(
-      "CREATE UNIQUE INDEX products_by_barcode ON products(barcode) WHERE barcode <> ''",
-    );
+    final indexes = {
+      for (final row in indexRows) row['name']! as String,
+    };
+    if (!indexes.contains('products_by_name')) {
+      await db.execute(
+        'CREATE INDEX products_by_name ON products(name COLLATE NOCASE, id)',
+      );
+    }
+    if (!indexes.contains('products_by_category')) {
+      await db.execute(
+        'CREATE INDEX products_by_category ON products(category COLLATE NOCASE, id)',
+      );
+    }
+    if (!indexes.contains('products_by_barcode')) {
+      await db.execute(
+        "CREATE UNIQUE INDEX products_by_barcode ON products(barcode) WHERE barcode <> ''",
+      );
+    }
   }
 
   static Future<void> _createProductInvoiceAndSettingsTables(Database db) async {
