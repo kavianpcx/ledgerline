@@ -156,9 +156,39 @@ jobs:
           using System.Runtime.InteropServices;
           public static class LedgerlineWindowTest {
             [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr handle);
+            [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
             [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr handle, int command);
             [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr handle);
             [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr handle);
+            [StructLayout(LayoutKind.Sequential)] public struct Input {
+              public uint type;
+              public InputUnion data;
+            }
+            [StructLayout(LayoutKind.Explicit)] public struct InputUnion {
+              [FieldOffset(0)] public MouseInput mouse;
+              [FieldOffset(0)] public KeyboardInput keyboard;
+            }
+            [StructLayout(LayoutKind.Sequential)] public struct MouseInput {
+              public int dx; public int dy; public uint mouseData; public uint flags; public uint time; public IntPtr extra;
+            }
+            [StructLayout(LayoutKind.Sequential)] public struct KeyboardInput {
+              public ushort vk; public ushort scan; public uint flags; public uint time; public IntPtr extra;
+            }
+            [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, Input[] inputs, int size);
+            public static bool SendChord(ushort key) {
+              ushort[] keys = new ushort[] { 0x11, 0x10, key };
+              Input[] inputs = new Input[6];
+              for (int i = 0; i < keys.Length; i++) {
+                inputs[i] = new Input { type = 1, data = new InputUnion { keyboard = new KeyboardInput { vk = keys[i] } } };
+              }
+              for (int i = keys.Length - 1; i >= 0; i--) {
+                inputs[keys.Length + (keys.Length - 1 - i)] = new Input {
+                  type = 1,
+                  data = new InputUnion { keyboard = new KeyboardInput { vk = keys[i], flags = 2 } }
+                };
+              }
+              return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) == inputs.Length;
+            }
           }
           "@
           $smokeInstallDirectory = Join-Path $env:RUNNER_TEMP 'LedgerlineInstallerSmoke'
@@ -201,13 +231,16 @@ jobs:
             if ($process.MainWindowHandle -eq [IntPtr]::Zero) { throw "Ledgerline window was not available for $scenario." }
             [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
             if ($scenario -eq 'titlebar') {
-              [System.Windows.Forms.SendKeys]::SendWait('^+f')
+              [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
+              Start-Sleep -Milliseconds 500
+              if ([LedgerlineWindowTest]::GetForegroundWindow() -ne $process.MainWindowHandle) { throw 'Could not activate Ledgerline for keyboard shortcut verification.' }
+              if (-not [LedgerlineWindowTest]::SendChord(0x46)) { throw 'Windows did not accept the Ctrl+Shift+F key input.' }
               Start-Sleep -Seconds 1
               if (-not [LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { throw 'Ctrl+Shift+F did not maximize the Ledgerline window.' }
-              [System.Windows.Forms.SendKeys]::SendWait('^+f')
+              if (-not [LedgerlineWindowTest]::SendChord(0x46)) { throw 'Windows did not accept the Ctrl+Shift+F restore input.' }
               Start-Sleep -Seconds 1
               if ([LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { throw 'Ctrl+Shift+F did not restore the Ledgerline window.' }
-              [System.Windows.Forms.SendKeys]::SendWait('^+m')
+              if (-not [LedgerlineWindowTest]::SendChord(0x4D)) { throw 'Windows did not accept the Ctrl+Shift+M key input.' }
               Start-Sleep -Seconds 1
               if (-not [LedgerlineWindowTest]::IsIconic($process.MainWindowHandle)) { throw 'Ctrl+Shift+M did not minimize the Ledgerline window.' }
               [LedgerlineWindowTest]::ShowWindow($process.MainWindowHandle, 9) | Out-Null
