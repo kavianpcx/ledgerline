@@ -294,8 +294,8 @@ class _NavigationSearchDialogState extends State<_NavigationSearchDialog> {
       return tr(context, entry.value.$1).toLowerCase().contains(query);
     }).toList(growable: false);
     final viewport = MediaQuery.sizeOf(context);
-    final width = viewport.width < 480 ? viewport.width - 40 : 420.0;
-    final height = viewport.height < 480 ? viewport.height - 40 : 420.0;
+    final width = (viewport.width - 80).clamp(1.0, 420.0).toDouble();
+    final height = (viewport.height - 48).clamp(1.0, 420.0).toDouble();
 
     return Dialog(
       child: SizedBox(

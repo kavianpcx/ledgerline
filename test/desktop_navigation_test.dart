@@ -116,6 +116,10 @@ void main() {
   });
 
   testWidgets('collapsed sidebar exposes tooltips and searchable page selection', (tester) async {
+    tester.view.physicalSize = const Size(360, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final selected = <int>[];
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
@@ -137,6 +141,10 @@ void main() {
     expect(find.byTooltip('Products'), findsOneWidget);
     await tester.tap(find.byKey(const Key('desktop-sidebar-search-button')));
     await tester.pumpAndSettle();
+    final dialogSize = tester.getSize(find.byType(Dialog));
+    expect(dialogSize.width, lessThanOrEqualTo(280));
+    expect(dialogSize.height, lessThanOrEqualTo(420));
+    expect(tester.takeException(), isNull);
     await tester.enterText(find.byType(TextField).last, 'Products');
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('desktop-navigation-search-result-3')), findsOneWidget);
