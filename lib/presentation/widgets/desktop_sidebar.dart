@@ -313,7 +313,6 @@ class _LedgerDesktopSidebarState extends State<LedgerDesktopSidebar> {
                 ),
               ),
             );
-            );
           },
         ),
       );
