@@ -37,6 +37,7 @@ jobs:
           - test/ledger_repository_test.dart
           - test/widget_test.dart
           - test/update_service_test.dart
+          - test/searchable_select_test.dart
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
