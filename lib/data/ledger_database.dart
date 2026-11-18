@@ -12,7 +12,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 3,
+        version: 4,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -28,7 +28,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       inMemoryDatabasePath,
       options: OpenDatabaseOptions(
-        version: 3,
+        version: 4,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -77,6 +77,7 @@ class LedgerDatabase {
     );
     await _createProductInvoiceAndSettingsTables(db);
     await _createInvoicePaymentsTable(db);
+    await _upgradeProductsToV4(db);
   }
 
   static Future<void> _upgradeSchema(
@@ -90,6 +91,29 @@ class LedgerDatabase {
     if (oldVersion < 3) {
       await _createInvoicePaymentsTable(db);
     }
+    if (oldVersion < 4) {
+      await _upgradeProductsToV4(db);
+    }
+  }
+
+
+  static Future<void> _upgradeProductsToV4(Database db) async {
+    await db.execute("ALTER TABLE products ADD COLUMN description TEXT NOT NULL DEFAULT ''");
+    await db.execute("ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT ''");
+    await db.execute("ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAULT ''");
+    await db.execute("ALTER TABLE products ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''");
+    await db.execute(
+      "UPDATE products SET updated_at = created_at WHERE updated_at = ''",
+    );
+    await db.execute(
+      'CREATE INDEX products_by_name ON products(name COLLATE NOCASE, id)',
+    );
+    await db.execute(
+      'CREATE INDEX products_by_category ON products(category COLLATE NOCASE, id)',
+    );
+    await db.execute(
+      "CREATE UNIQUE INDEX products_by_barcode ON products(barcode) WHERE barcode <> ''",
+    );
   }
 
   static Future<void> _createProductInvoiceAndSettingsTables(Database db) async {

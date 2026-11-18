@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ledgerline/domain/account.dart';
 import 'package:ledgerline/data/ledger_database.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:ledgerline/data/ledger_repository.dart';
 import 'package:ledgerline/domain/accounting_engine.dart';
 import 'package:ledgerline/domain/app_settings.dart';
@@ -532,5 +533,222 @@ void main() {
     final settings = await repository.loadAppSettings();
     expect(settings.desktopSidebarCollapsed, isTrue);
   });
+
+
+  test('product search and sorting use bounded database pages', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+
+    for (var i = 0; i < 31; i++) {
+      final index = i.toString().padLeft(3, '0');
+      await repository.createProduct(ProductDraft(
+        sku: 'SKU-' + index,
+        name: 'Item ' + i.toString(),
+        unitPriceCents: 100 + i,
+        unitCostCents: 50,
+        stockQuantity: 0,
+        category: i.isEven ? 'Food' : 'Tools',
+        barcode: '900000' + index,
+      ));
+    }
+    await repository.createProduct(const ProductDraft(
+      sku: 'COTTON-1',
+      name: '100% Cotton',
+      unitPriceCents: 50,
+      unitCostCents: 20,
+      stockQuantity: 0,
+      category: 'Clothing',
+      barcode: '99999901',
+    ));
+
+    final first = await repository.loadProductPage(
+      pageIndex: 0,
+      pageSize: 10,
+      sortBy: 'price',
+      ascending: false,
+    );
+    expect(first.totalCount, 32);
+    expect(first.products, hasLength(10));
+    expect(first.products.first.sku, 'SKU-030');
+    expect(first.pageCount, 4);
+    expect(first.firstItemNumber, 1);
+    expect(first.lastItemNumber, 10);
+
+    final last = await repository.loadProductPage(pageIndex: 3, pageSize: 10);
+    expect(last.products, hasLength(2));
+    expect(last.lastItemNumber, 32);
+
+    final skuSearch = await repository.loadProductPage(
+      query: 'SKU-02',
+      pageSize: 10,
+    );
+    expect(skuSearch.totalCount, 10);
+    expect(skuSearch.products, hasLength(10));
+
+    final literalPercent = await repository.loadProductPage(
+      query: '100%',
+      pageSize: 10,
+    );
+    expect(literalPercent.totalCount, 1);
+    expect(literalPercent.products.single.sku, 'COTTON-1');
+
+    await expectLater(
+      repository.loadProductPage(pageSize: 20),
+      throwsArgumentError,
+    );
+  });
+
+  test('editing products preserves invoice snapshots and posts cost revaluation', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await repository.createProduct(const ProductDraft(
+      sku: 'BOOK-OLD',
+      name: 'Ledger Book',
+      unitPriceCents: 1000,
+      unitCostCents: 400,
+      stockQuantity: 5,
+      category: 'Books',
+      barcode: '10001000',
+      description: 'Original description',
+    ));
+    final product = (await repository.loadProducts()).single;
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'History customer',
+      date: DateTime(2026, 8, 2),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 2)],
+    ));
+    final invoiceBefore = (await database.handle.query('sales_invoices')).single;
+    final lineBefore = (await database.handle.query('invoice_lines')).single;
+
+    await repository.updateProduct(product.id, const ProductDraft(
+      sku: 'BOOK-NEW',
+      name: 'Updated Ledger Book',
+      unitPriceCents: 1200,
+      unitCostCents: 500,
+      stockQuantity: 999,
+      category: 'Stationery',
+      barcode: '10001001',
+      description: 'Updated description',
+    ));
+
+    final updated = (await repository.loadProducts()).single;
+    expect(updated.sku, 'BOOK-NEW');
+    expect(updated.name, 'Updated Ledger Book');
+    expect(updated.description, 'Updated description');
+    expect(updated.category, 'Stationery');
+    expect(updated.barcode, '10001001');
+    expect(updated.stockQuantity, 3);
+
+    final invoiceAfter = (await database.handle.query('sales_invoices')).single;
+    final lineAfter = (await database.handle.query('invoice_lines')).single;
+    expect(invoiceAfter['total_cents'], invoiceBefore['total_cents']);
+    expect(lineAfter['description'], lineBefore['description']);
+    expect(lineAfter['unit_price_cents'], 1000);
+    expect(lineAfter['unit_cost_cents'], 400);
+    expect(lineAfter['line_total_cents'], lineBefore['line_total_cents']);
+
+    final snapshot = await repository.loadSnapshot();
+    expect(snapshot.assetsCents,
+        snapshot.liabilitiesCents + snapshot.equityCents + snapshot.netIncomeCents);
+  });
+
+  test('v3 product rows migrate without changing values', () async {
+    final directory = await Directory.systemTemp.createTemp('ledgerline-v3-products-');
+    addTearDown(() => directory.delete(recursive: true));
+    final path = directory.path + Platform.pathSeparator + 'legacy.sqlite';
+    sqfliteFfiInit();
+    final legacy = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 3,
+        onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE products (
+              id TEXT PRIMARY KEY,
+              sku TEXT NOT NULL UNIQUE,
+              name TEXT NOT NULL,
+              unit_price_cents INTEGER NOT NULL,
+              unit_cost_cents INTEGER NOT NULL DEFAULT 0,
+              stock_quantity INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL
+            )
+          ''');
+        },
+      ),
+    );
+    const createdAt = '2026-01-03T00:00:00.000Z';
+    await legacy.insert('products', {
+      'id': 'legacy-1',
+      'sku': 'OLD-1',
+      'name': 'Legacy product',
+      'unit_price_cents': 1234,
+      'unit_cost_cents': 456,
+      'stock_quantity': 7,
+      'created_at': createdAt,
+    });
+    await legacy.close();
+
+    final upgraded = await LedgerDatabase.open(path);
+    addTearDown(upgraded.close);
+    final migrated = (await upgraded.handle.query('products')).single;
+    expect(migrated['unit_price_cents'], 1234);
+    expect(migrated['unit_cost_cents'], 456);
+    expect(migrated['stock_quantity'], 7);
+    expect(migrated['description'], '');
+    expect(migrated['category'], '');
+    expect(migrated['barcode'], '');
+    expect(migrated['updated_at'], createdAt);
+  });
+
+
+  test('10,000 product catalog stays page-bounded during search', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    final timestamp = DateTime.utc(2026, 1, 1).toIso8601String();
+
+    await database.handle.transaction((txn) async {
+      final batch = txn.batch();
+      for (var i = 0; i < 10000; i++) {
+        batch.insert('products', {
+          'id': 'bulk-' + i.toString(),
+          'sku': 'SKU-' + i.toString().padLeft(5, '0'),
+          'name': 'Inventory item ' + i.toString(),
+          'unit_price_cents': 100,
+          'unit_cost_cents': 10,
+          'stock_quantity': 0,
+          'created_at': timestamp,
+          'updated_at': timestamp,
+        });
+      }
+      await batch.commit(noResult: true);
+    });
+
+    final page = await repository.loadProductPage(
+      query: 'SKU-099',
+      pageIndex: 2,
+      pageSize: 25,
+      sortBy: 'sku',
+    );
+    expect(page.totalCount, 100);
+    expect(page.products, hasLength(25));
+    expect(page.products.first.sku, 'SKU-09950');
+    expect(page.products.last.sku, 'SKU-09974');
+    expect(page.pageCount, 4);
+  });
+
 
 }

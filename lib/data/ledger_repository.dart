@@ -30,6 +30,7 @@ class LedgerRepository {
       Account(id: 'sales-income', code: '4000', name: 'Sales income', type: AccountType.income),
       Account(id: 'service-income', code: '4100', name: 'Service income', type: AccountType.income),
       Account(id: 'cost-of-goods', code: '5000', name: 'Cost of goods sold', type: AccountType.expense),
+      Account(id: 'inventory-valuation-gain', code: '4200', name: 'Inventory valuation gain', type: AccountType.income),
       Account(id: 'office-expense', code: '6000', name: 'Office expense', type: AccountType.expense),
       Account(id: 'travel-expense', code: '6100', name: 'Travel expense', type: AccountType.expense),
       Account(id: 'inventory-shrinkage', code: '6300', name: 'Inventory shrinkage', type: AccountType.expense),
@@ -172,30 +173,90 @@ class LedgerRepository {
   }
 
   Future<List<Product>> loadProducts() async {
-    final rows = await _database.handle.query('products', orderBy: 'name COLLATE NOCASE ASC');
+    final rows = await _database.handle.query(
+      'products',
+      orderBy: 'name COLLATE NOCASE ASC, id ASC',
+    );
     return rows.map(Product.fromRow).toList(growable: false);
   }
 
+  Future<ProductPage> loadProductPage({
+    String query = '',
+    int pageIndex = 0,
+    int pageSize = 25,
+    String sortBy = 'name',
+    bool ascending = true,
+  }) async {
+    const allowedPageSizes = {10, 25, 50, 100};
+    const sortColumns = {
+      'name': 'name COLLATE NOCASE',
+      'sku': 'sku COLLATE NOCASE',
+      'category': 'category COLLATE NOCASE',
+      'price': 'unit_price_cents',
+      'stock': 'stock_quantity',
+    };
+    if (!allowedPageSizes.contains(pageSize)) {
+      throw ArgumentError.value(pageSize, 'pageSize', 'Use 10, 25, 50, or 100.');
+    }
+    if (pageIndex < 0) throw ArgumentError.value(pageIndex, 'pageIndex');
+    final sortColumn = sortColumns[sortBy];
+    if (sortColumn == null) throw ArgumentError.value(sortBy, 'sortBy');
+
+    final normalizedQuery = query.trim();
+    final escapedQuery = normalizedQuery
+        .replaceAll('!', '!!')
+        .replaceAll('%', '!%')
+        .replaceAll('_', '!_');
+    final where = normalizedQuery.isEmpty
+        ? ''
+        : "WHERE (name LIKE ? ESCAPE '!' OR sku LIKE ? ESCAPE '!' OR barcode LIKE ? ESCAPE '!' OR category LIKE ? ESCAPE '!')";
+    final whereArgs = normalizedQuery.isEmpty
+        ? <Object?>[]
+        : List<Object?>.filled(4, '$escapedQuery%');
+
+    return _database.handle.transaction((txn) async {
+      final countRows = await txn.rawQuery(
+        'SELECT COUNT(*) AS total_count FROM products $where',
+        whereArgs,
+      );
+      final totalCount = countRows.single['total_count']! as int;
+      final lastPageIndex =
+          totalCount == 0 ? 0 : (totalCount - 1) ~/ pageSize;
+      final safePageIndex =
+          pageIndex > lastPageIndex ? lastPageIndex : pageIndex;
+      final rows = await txn.rawQuery(
+        'SELECT * FROM products $where ORDER BY $sortColumn ${ascending ? 'ASC' : 'DESC'}, id ASC LIMIT ? OFFSET ?',
+        [...whereArgs, pageSize, safePageIndex * pageSize],
+      );
+      return ProductPage(
+        products: rows.map(Product.fromRow).toList(growable: false),
+        totalCount: totalCount,
+        pageIndex: safePageIndex,
+        pageSize: pageSize,
+      );
+    });
+  }
+
   Future<void> createProduct(ProductDraft draft) async {
-    if (draft.name.trim().isEmpty || draft.sku.trim().isEmpty) {
-      throw ArgumentError('Product name and SKU are required.');
-    }
-    if (draft.unitPriceCents <= 0 || draft.unitCostCents < 0 || draft.stockQuantity < 0) {
-      throw ArgumentError('Price must be positive; cost and stock cannot be negative.');
-    }
+    _validateProductDraft(draft);
     final db = _database.handle;
     final now = DateTime.now();
     final productId = 'product_${now.microsecondsSinceEpoch}';
+    final timestamp = now.toUtc().toIso8601String();
     await db.transaction((txn) async {
       await _requireAccountingCurrency(txn);
       await txn.insert('products', {
         'id': productId,
         'sku': draft.sku.trim().toUpperCase(),
         'name': draft.name.trim(),
+        'description': draft.description.trim(),
+        'category': draft.category.trim(),
+        'barcode': draft.barcode.trim(),
         'unit_price_cents': draft.unitPriceCents,
         'unit_cost_cents': draft.unitCostCents,
         'stock_quantity': draft.stockQuantity,
-        'created_at': now.toUtc().toIso8601String(),
+        'created_at': timestamp,
+        'updated_at': timestamp,
       });
       final openingValue = draft.unitCostCents * draft.stockQuantity;
       if (openingValue > 0) {
@@ -210,6 +271,77 @@ class LedgerRepository {
         );
       }
     });
+  }
+
+  Future<void> updateProduct(String productId, ProductDraft draft) async {
+    _validateProductDraft(draft);
+    await _database.handle.transaction((txn) async {
+      await _requireAccountingCurrency(txn);
+      final rows = await txn.query(
+        'products',
+        where: 'id = ?',
+        whereArgs: [productId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Product not found.');
+      final current = Product.fromRow(rows.single);
+      final costDelta = draft.unitCostCents - current.unitCostCents;
+      const maxSignedInt = 0x7fffffffffffffff;
+      if (costDelta != 0 &&
+          current.stockQuantity > maxSignedInt ~/ costDelta.abs()) {
+        throw ArgumentError('Updated inventory value exceeds the supported integer range.');
+      }
+      final inventoryValueDelta = costDelta * current.stockQuantity;
+
+      await txn.update(
+        'products',
+        {
+          'sku': draft.sku.trim().toUpperCase(),
+          'name': draft.name.trim(),
+          'description': draft.description.trim(),
+          'category': draft.category.trim(),
+          'barcode': draft.barcode.trim(),
+          'unit_price_cents': draft.unitPriceCents,
+          'unit_cost_cents': draft.unitCostCents,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [productId],
+      );
+
+      if (inventoryValueDelta != 0) {
+        final now = DateTime.now();
+        final amount = inventoryValueDelta.abs();
+        await _insertTwoLineJournalEntry(
+          txn,
+          entryId: 'product_cost_${now.microsecondsSinceEpoch}',
+          date: now,
+          description: 'Inventory cost update · ${current.sku}',
+          debitAccountId:
+              inventoryValueDelta > 0 ? 'inventory' : 'inventory-shrinkage',
+          creditAccountId:
+              inventoryValueDelta > 0 ? 'inventory-valuation-gain' : 'inventory',
+          amountCents: amount,
+        );
+      }
+    });
+  }
+
+  void _validateProductDraft(ProductDraft draft) {
+    if (draft.name.trim().isEmpty || draft.sku.trim().isEmpty) {
+      throw ArgumentError('Product name and SKU are required.');
+    }
+    if (draft.unitPriceCents <= 0 || draft.unitCostCents < 0 || draft.stockQuantity < 0) {
+      throw ArgumentError('Price must be positive; cost and stock cannot be negative.');
+    }
+    const maxSignedInt = 0x7fffffffffffffff;
+    if (draft.stockQuantity > 0 &&
+        draft.unitCostCents > maxSignedInt ~/ draft.stockQuantity) {
+      throw ArgumentError('Opening inventory value exceeds the supported integer range.');
+    }
+    if (draft.barcode.trim().contains(RegExp(r'\s'))) {
+      throw ArgumentError('Barcode cannot contain whitespace.');
+    }
   }
 
   Future<void> adjustStock(String productId, int delta) async {

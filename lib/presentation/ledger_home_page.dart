@@ -55,6 +55,13 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   bool _updateCheckFailed = false;
   UpdateInfo? _availableUpdate;
   bool _sidebarExpandedAtMediumWidth = false;
+  late final TextEditingController _productSearchController;
+  Future<ProductPage>? _productPageFuture;
+  Timer? _productSearchDebounce;
+  int _productPageIndex = 0;
+  int _productPageSize = 25;
+  String _productSortBy = 'name';
+  bool _productSortAscending = true;
 
   static const _destinations = <(String, IconData, IconData)>[
     ('overview', Icons.grid_view_rounded, Icons.grid_view_outlined),
@@ -94,6 +101,9 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     }
     _snapshot = widget.repository.loadSnapshot();
     _businessNameController = TextEditingController(text: widget.settings.businessName);
+    _productSearchController = TextEditingController();
+    _productSearchController.addListener(_onProductSearchChanged);
+    _productPageFuture = _loadProductPage();
     _updateService = const UpdateService();
     if (kReleaseMode) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -106,6 +116,9 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     _businessNameController.dispose();
+    _productSearchDebounce?.cancel();
+    _productSearchController.removeListener(_onProductSearchChanged);
+    _productSearchController.dispose();
     super.dispose();
   }
 
@@ -221,9 +234,38 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     }
   }
 
+  Future<ProductPage> _loadProductPage() => widget.repository.loadProductPage(
+        query: _productSearchController.text,
+        pageIndex: _productPageIndex,
+        pageSize: _productPageSize,
+        sortBy: _productSortBy,
+        ascending: _productSortAscending,
+      );
+
+  void _onProductSearchChanged() {
+    _productSearchDebounce?.cancel();
+    _productSearchDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted) return;
+      setState(() {
+        _productPageIndex = 0;
+        _productPageFuture = _loadProductPage();
+      });
+    });
+  }
+
+  void _refreshProductPage({bool resetPage = false}) {
+    if (resetPage) _productPageIndex = 0;
+    _productPageFuture = _loadProductPage();
+  }
+
   Future<void> _reload() async {
-    setState(() => _snapshot = widget.repository.loadSnapshot());
+    setState(() {
+      _snapshot = widget.repository.loadSnapshot();
+      _refreshProductPage();
+    });
     await _snapshot;
+    final productPage = _productPageFuture;
+    if (productPage != null) await productPage;
   }
 
   Future<void> _addEntry(LedgerSnapshot snapshot) async {
@@ -280,6 +322,25 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
       if (mounted) _notify('Product saved.');
     } on Object catch (error) {
       if (mounted) _notify('Could not save product: $error');
+    }
+  }
+
+  Future<void> _editProduct(Product product) async {
+    if (!_requireAccountingCurrency()) return;
+    final draft = await showDialog<ProductDraft>(
+      context: context,
+      builder: (context) => _ProductDialog(
+        currencyCode: widget.settings.currencyCode,
+        product: product,
+      ),
+    );
+    if (draft == null || !mounted) return;
+    try {
+      await widget.repository.updateProduct(product.id, draft);
+      await _reload();
+      if (mounted) _notify(tr(context, 'productUpdated'));
+    } on Object catch (error) {
+      if (mounted) _notify(tr(context, 'errorCouldNotSave') + ': ' + error.toString());
     }
   }
 
@@ -710,45 +771,287 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     );
   }
 
-  Widget _products(LedgerSnapshot snapshot) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(tr(context, 'productsTitle'), style: _pageTitle),
-          const SizedBox(height: 6),
-          Text(tr(context, 'productsHint'), style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-          const SizedBox(height: 16),
-          Align(
-            alignment: AlignmentDirectional.centerEnd,
-            child: FilledButton.icon(
-              onPressed: _addProduct,
-              icon: const Icon(Icons.add_rounded),
-              label: Text(tr(context, 'newProduct')),
-            ),
+  Widget _products(LedgerSnapshot snapshot) {
+    final pageFuture = _productPageFuture ??= _loadProductPage();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(tr(context, 'productsTitle'), style: _pageTitle),
+        const SizedBox(height: 6),
+        Text(
+          tr(context, 'productsHint'),
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 16),
+        Align(
+          alignment: AlignmentDirectional.centerEnd,
+          child: FilledButton.icon(
+            onPressed: _addProduct,
+            icon: const Icon(Icons.add_rounded),
+            label: Text(tr(context, 'newProduct')),
           ),
-          const SizedBox(height: 12),
-          if (snapshot.products.isEmpty)
-            Card(child: Padding(padding: const EdgeInsets.all(24), child: Center(child: Text(tr(context, 'noProducts')))))
-          else
-            for (final product in snapshot.products)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: ListTile(
-                    leading: const CircleAvatar(child: Icon(Icons.inventory_2_outlined)),
-                    title: Text(product.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                    subtitle: Text('${product.sku} · ${tr(context, 'stockOnHand')}: ${product.stockQuantity}'),
-                    trailing: Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text(_money(product.unitPriceCents, widget.settings.currencyCode), style: const TextStyle(fontWeight: FontWeight.w800)),
-                        IconButton(tooltip: tr(context, 'restock'), onPressed: () => _adjustStock(product, 1), icon: const Icon(Icons.add_circle_outline)),
-                        IconButton(tooltip: tr(context, 'reduceStock'), onPressed: product.stockQuantity == 0 ? null : () => _adjustStock(product, -1), icon: const Icon(Icons.remove_circle_outline)),
-                      ],
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _productSearchController,
+          decoration: InputDecoration(
+            hintText: tr(context, 'productSearchHint'),
+            prefixIcon: const Icon(Icons.search_rounded),
+            suffixIcon: _productSearchController.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: tr(context, 'clearSearch'),
+                    onPressed: _productSearchController.clear,
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+          ),
+          textInputAction: TextInputAction.search,
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SizedBox(
+              width: 210,
+              child: SearchableSelect<String>(
+                id: 'products-sort',
+                label: tr(context, 'sortBy'),
+                searchHint: tr(context, 'sortBy'),
+                emptyLabel: tr(context, 'noSearchResults'),
+                value: _productSortBy,
+                options: [
+                  SearchableSelectOption(value: 'name', label: tr(context, 'productName')),
+                  SearchableSelectOption(value: 'sku', label: tr(context, 'sku')),
+                  SearchableSelectOption(value: 'category', label: tr(context, 'productCategory')),
+                  SearchableSelectOption(value: 'price', label: tr(context, 'sellingPrice')),
+                  SearchableSelectOption(value: 'stock', label: tr(context, 'stockOnHand')),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() {
+                    _productSortBy = value;
+                    _refreshProductPage(resetPage: true);
+                  });
+                },
+              ),
+            ),
+            IconButton(
+              tooltip: tr(context, _productSortAscending ? 'sortAscending' : 'sortDescending'),
+              onPressed: () => setState(() {
+                _productSortAscending = !_productSortAscending;
+                _refreshProductPage(resetPage: true);
+              }),
+              icon: Icon(_productSortAscending
+                  ? Icons.arrow_upward_rounded
+                  : Icons.arrow_downward_rounded),
+            ),
+            SizedBox(
+              width: 170,
+              child: SearchableSelect<int>(
+                id: 'products-page-size',
+                label: tr(context, 'pageSize'),
+                searchHint: tr(context, 'pageSize'),
+                emptyLabel: tr(context, 'noSearchResults'),
+                value: _productPageSize,
+                options: [10, 25, 50, 100]
+                    .map((size) => SearchableSelectOption(value: size, label: size.toString()))
+                    .toList(growable: false),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() {
+                    _productPageSize = value;
+                    _refreshProductPage(resetPage: true);
+                  });
+                },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        FutureBuilder<ProductPage>(
+          future: pageFuture,
+          builder: (context, result) {
+            if (result.connectionState == ConnectionState.waiting) {
+              final skeletonColor =
+                  Theme.of(context).colorScheme.surfaceContainerHighest;
+              return Column(
+                children: List.generate(
+                  3,
+                  (_) => Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            backgroundColor: skeletonColor,
+                            radius: 20,
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  height: 12,
+                                  width: 190,
+                                  decoration: BoxDecoration(
+                                    color: skeletonColor,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                Container(
+                                  height: 9,
+                                  width: 260,
+                                  decoration: BoxDecoration(
+                                    color: skeletonColor,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
+              );
+            }
+            if (result.hasError) {
+              return Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      Text(tr(context, 'productLoadFailed')),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: () => setState(() => _refreshProductPage()),
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: Text(tr(context, 'retry')),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+            final page = result.data;
+            if (page == null || page.products.isEmpty) {
+              final isEmptyCatalog =
+                  _productSearchController.text.trim().isEmpty;
+              return Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Center(
+                    child: Text(
+                      isEmptyCatalog
+                          ? tr(context, 'noProducts')
+                          : tr(context, 'noProductsMatch'),
+                    ),
+                  ),
+                ),
+              );
+            }
+            return Column(
+              children: [
+                for (final product in page.products) _productCard(product),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        page.firstItemNumber.toString() +
+                            '–' +
+                            page.lastItemNumber.toString() +
+                            ' / ' +
+                            page.totalCount.toString(),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: tr(context, 'previousPage'),
+                      onPressed: page.pageIndex == 0
+                          ? null
+                          : () => setState(() {
+                                _productPageIndex--;
+                                _refreshProductPage();
+                              }),
+                      icon: const Icon(Icons.chevron_left_rounded),
+                    ),
+                    Text(
+                      (page.pageIndex + 1).toString() +
+                          ' / ' +
+                          page.pageCount.toString(),
+                    ),
+                    IconButton(
+                      tooltip: tr(context, 'nextPage'),
+                      onPressed: page.pageIndex + 1 >= page.pageCount
+                          ? null
+                          : () => setState(() {
+                                _productPageIndex++;
+                                _refreshProductPage();
+                              }),
+                      icon: const Icon(Icons.chevron_right_rounded),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _productCard(Product product) => Card(
+        child: Column(
+          children: [
+            ListTile(
+              leading: const CircleAvatar(child: Icon(Icons.inventory_2_outlined)),
+              title: Text(product.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text([
+                product.sku,
+                if (product.barcode.isNotEmpty) product.barcode,
+                if (product.category.isNotEmpty) product.category,
+                tr(context, 'stockOnHand') + ': ' + product.stockQuantity.toString(),
+              ].join(' · ')),
+              trailing: IconButton(
+                tooltip: tr(context, 'editProduct'),
+                onPressed: () => _editProduct(product),
+                icon: const Icon(Icons.edit_outlined),
               ),
-        ],
+            ),
+            Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(16, 0, 12, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _money(product.unitPriceCents, widget.settings.currencyCode),
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: tr(context, 'restock'),
+                    onPressed: () => _adjustStock(product, 1),
+                    icon: const Icon(Icons.add_circle_outline),
+                  ),
+                  IconButton(
+                    tooltip: tr(context, 'reduceStock'),
+                    onPressed: product.stockQuantity == 0
+                        ? null
+                        : () => _adjustStock(product, -1),
+                    icon: const Icon(Icons.remove_circle_outline),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       );
 
   Widget _invoices(LedgerSnapshot snapshot) => Column(
@@ -1582,9 +1885,10 @@ class _EntryDialogState extends State<_EntryDialog> {
 }
 
 class _ProductDialog extends StatefulWidget {
-  const _ProductDialog({required this.currencyCode});
+  const _ProductDialog({required this.currencyCode, this.product});
 
   final String currencyCode;
+  final Product? product;
 
   @override
   State<_ProductDialog> createState() => _ProductDialogState();
@@ -1592,16 +1896,46 @@ class _ProductDialog extends StatefulWidget {
 
 class _ProductDialogState extends State<_ProductDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _sku = TextEditingController();
-  final _name = TextEditingController();
-  final _price = TextEditingController();
-  final _cost = TextEditingController();
-  final _stock = TextEditingController(text: '0');
+  late final TextEditingController _sku;
+  late final TextEditingController _name;
+  late final TextEditingController _description;
+  late final TextEditingController _category;
+  late final TextEditingController _barcode;
+  late final TextEditingController _price;
+  late final TextEditingController _cost;
+  late final TextEditingController _stock;
+
+  @override
+  void initState() {
+    super.initState();
+    final product = widget.product;
+    _sku = TextEditingController(text: product?.sku ?? '');
+    _name = TextEditingController(text: product?.name ?? '');
+    _description = TextEditingController(text: product?.description ?? '');
+    _category = TextEditingController(text: product?.category ?? '');
+    _barcode = TextEditingController(text: product?.barcode ?? '');
+    _price = TextEditingController(
+      text: product == null
+          ? ''
+          : CurrencyDefinition.of(widget.currencyCode)
+              .formatInput(product.unitPriceCents),
+    );
+    _cost = TextEditingController(
+      text: product == null
+          ? ''
+          : CurrencyDefinition.of(widget.currencyCode)
+              .formatInput(product.unitCostCents),
+    );
+    _stock = TextEditingController(text: product?.stockQuantity.toString() ?? '0');
+  }
 
   @override
   void dispose() {
     _sku.dispose();
     _name.dispose();
+    _description.dispose();
+    _category.dispose();
+    _barcode.dispose();
     _price.dispose();
     _cost.dispose();
     _stock.dispose();
@@ -1610,7 +1944,7 @@ class _ProductDialogState extends State<_ProductDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: Text(tr(context, 'newProduct')),
+        title: Text(tr(context, widget.product == null ? 'newProduct' : 'editProduct')),
         content: SizedBox(
           width: 440,
           child: Form(
@@ -1621,22 +1955,90 @@ class _ProductDialogState extends State<_ProductDialog> {
                 const SizedBox(height: 12),
                 TextFormField(controller: _sku, decoration: InputDecoration(labelText: tr(context, 'sku')), validator: _required),
                 const SizedBox(height: 12),
-                TextFormField(controller: _price, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: tr(context, 'sellingPrice'), prefixText: '${widget.currencyCode} '), validator: (value) { final cents = _EntryDialogState._parseCents(value ?? '', currencyCode: widget.currencyCode); return cents == null || cents <= 0 ? 'Enter an amount greater than zero.' : null; }),
+                TextFormField(
+                  controller: _barcode,
+                  decoration: InputDecoration(labelText: tr(context, 'productBarcode')),
+                  validator: (value) => value != null && value.trim().contains(RegExp(r'\s'))
+                      ? tr(context, 'barcodeNoWhitespace')
+                      : null,
+                ),
                 const SizedBox(height: 12),
-                TextFormField(controller: _cost, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: tr(context, 'unitCost'), prefixText: '${widget.currencyCode} '), validator: (value) => value == null || value.trim().isEmpty || _EntryDialogState._parseCents(value, currencyCode: widget.currencyCode) == null ? 'Enter a valid amount.' : null),
+                TextFormField(controller: _category, decoration: InputDecoration(labelText: tr(context, 'productCategory'))),
                 const SizedBox(height: 12),
-                TextFormField(controller: _stock, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: tr(context, 'stockOnHand')), validator: (value) => int.tryParse(value ?? '') == null || int.parse(value!) < 0 ? 'Enter zero or more.' : null),
+                TextFormField(
+                  controller: _description,
+                  maxLines: 3,
+                  decoration: InputDecoration(labelText: tr(context, 'productDescription')),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _price,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: tr(context, 'sellingPrice'),
+                    prefixText: widget.currencyCode + ' ',
+                  ),
+                  validator: (value) {
+                    final amount = CurrencyDefinition.parseMinorUnits(
+                      value ?? '',
+                      currencyCode: widget.currencyCode,
+                    );
+                    return amount == null || amount <= 0
+                        ? 'Enter an amount greater than zero.'
+                        : null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _cost,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: tr(context, 'unitCost'),
+                    prefixText: widget.currencyCode + ' ',
+                  ),
+                  validator: (value) {
+                    final amount = value == null
+                        ? null
+                        : CurrencyDefinition.parseMinorUnits(
+                            value,
+                            currencyCode: widget.currencyCode,
+                          );
+                    return amount == null || amount < 0
+                        ? 'Enter a non-negative amount.'
+                        : null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _stock,
+                  readOnly: widget.product != null,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: tr(context, 'stockOnHand'),
+                    helperText: widget.product == null
+                        ? null
+                        : tr(context, 'productStockEditHint'),
+                  ),
+                  validator: (value) =>
+                      int.tryParse(value ?? '') == null || int.parse(value!) < 0
+                          ? 'Enter zero or more.'
+                          : null,
+                ),
               ]),
             ),
           ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: Text(tr(context, 'cancel'))),
-          FilledButton(onPressed: _save, child: Text(tr(context, 'saveProduct'))),
+          FilledButton(
+            onPressed: _save,
+            child: Text(tr(context, widget.product == null ? 'saveProduct' : 'updateProduct')),
+          ),
         ],
       );
 
-  String? _required(String? value) => value == null || value.trim().isEmpty ? 'Required.' : null;
+  String? _required(String? value) =>
+      value == null || value.trim().isEmpty ? 'Required.' : null;
 
   void _save() {
     if (!_formKey.currentState!.validate()) return;
@@ -1645,8 +2047,17 @@ class _ProductDialogState extends State<_ProductDialog> {
       ProductDraft(
         sku: _sku.text,
         name: _name.text,
-        unitPriceCents: _EntryDialogState._parseCents(_price.text, currencyCode: widget.currencyCode)!,
-        unitCostCents: _EntryDialogState._parseCents(_cost.text, currencyCode: widget.currencyCode)!,
+        description: _description.text,
+        category: _category.text,
+        barcode: _barcode.text,
+        unitPriceCents: CurrencyDefinition.parseMinorUnits(
+          _price.text,
+          currencyCode: widget.currencyCode,
+        )!,
+        unitCostCents: CurrencyDefinition.parseMinorUnits(
+          _cost.text,
+          currencyCode: widget.currencyCode,
+        )!,
         stockQuantity: int.parse(_stock.text),
       ),
     );
