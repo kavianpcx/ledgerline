@@ -38,6 +38,7 @@ class LedgerHomePage extends StatefulWidget {
 
 class _LedgerHomePageState extends State<LedgerHomePage> {
   int _selectedIndex = 0;
+  int _settingsSectionIndex = 0;
   late Future<LedgerSnapshot> _snapshot;
   late final TextEditingController _businessNameController;
   late final UpdateService _updateService;
@@ -564,7 +565,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
       4 => _invoices(snapshot),
       5 => _reports(snapshot),
       6 => _smartImport(snapshot),
-      7 => _settingsPage(),
+      7 => _settingsPage(snapshot),
       _ => _more(snapshot),
     };
     return ListView(
@@ -675,157 +676,346 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     );
   }
 
-  Widget _settingsPage() => Column(
+  Widget _settingsPage(LedgerSnapshot snapshot) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(tr(context, 'settingsTitle'), style: _pageTitle),
+          const SizedBox(height: 5),
+          Text(tr(context, 'settingsSubtitle'), style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
           const SizedBox(height: 18),
-          Card(
-            child: Column(children: [
-              ListTile(title: Text(tr(context, 'business'), style: const TextStyle(fontWeight: FontWeight.w800))),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  TextField(
-                    controller: _businessNameController,
-                    decoration: InputDecoration(labelText: tr(context, 'businessName')),
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => _saveBusinessName(),
-                  ),
-                  const SizedBox(height: 12),
-                  SearchableSelect<String>(
-                    id: 'settings-currency',
-                    label: tr(context, 'currency'),
-                    searchHint: tr(context, 'searchCurrencies'),
-                    emptyLabel: tr(context, 'noSearchResults'),
-                    value: widget.settings.currencyCode,
-                    options: const [
-                      SearchableSelectOption(value: 'USD', label: 'USD · US Dollar'),
-                      SearchableSelectOption(value: 'EUR', label: 'EUR · Euro'),
-                      SearchableSelectOption(value: 'GBP', label: 'GBP · Pound sterling'),
-                      SearchableSelectOption(value: 'CAD', label: 'CAD · Canadian dollar'),
-                      SearchableSelectOption(value: 'AUD', label: 'AUD · Australian dollar'),
-                      SearchableSelectOption(value: 'AED', label: 'AED · UAE dirham'),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        widget.onSettingsChanged(widget.settings.copyWith(currencyCode: value));
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: AlignmentDirectional.centerEnd,
-                    child: FilledButton(
-                      onPressed: _saveBusinessName,
-                      child: Text(tr(context, 'saveSettings')),
-                    ),
-                  ),
-                ]),
-              ),
-            ]),
-          ),
-          const SizedBox(height: 14),
-          Card(
-            child: Column(children: [
-              ListTile(title: Text(tr(context, 'appearance'), style: const TextStyle(fontWeight: FontWeight.w800))),
-              SwitchListTile(
-                value: widget.settings.darkMode,
-                title: Text(tr(context, 'darkMode')),
-                subtitle: Text(tr(context, 'darkModeHint')),
-                onChanged: (value) => widget.onSettingsChanged(widget.settings.copyWith(darkMode: value)),
-              ),
-              const Divider(height: 1, indent: 16, endIndent: 16),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(tr(context, 'language'), style: const TextStyle(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 8),
-                  SearchableSelect<String>(
-                    id: 'settings-language',
-                    label: tr(context, 'language'),
-                    searchHint: tr(context, 'searchLanguages'),
-                    emptyLabel: tr(context, 'noSearchResults'),
-                    value: widget.settings.languageCode,
-                    options: [
-                      SearchableSelectOption(value: 'en', label: tr(context, 'english')),
-                      SearchableSelectOption(value: 'fa', label: tr(context, 'persian')),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        widget.onSettingsChanged(widget.settings.copyWith(languageCode: value));
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  Text(tr(context, 'languageRestart'), style: Theme.of(context).textTheme.bodySmall),
-                ]),
-              ),
-            ]),
-          ),
-          const SizedBox(height: 14),
-          Card(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              ListTile(title: Text(tr(context, 'backup'), style: const TextStyle(fontWeight: FontWeight.w800))),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(tr(context, 'backupDescription')),
-                  const SizedBox(height: 12),
-                  Wrap(spacing: 10, runSpacing: 8, children: [
-                    FilledButton.tonalIcon(
-                      onPressed: _exportBackup,
-                      icon: const Icon(Icons.save_alt_rounded),
-                      label: Text(tr(context, 'exportBackup')),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _restoringBackup ? null : _restoreBackup,
-                      icon: _restoringBackup
-                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.restore_rounded),
-                      label: Text(tr(context, 'restoreBackup')),
-                    ),
-                  ]),
-                  const SizedBox(height: 12),
-                  Text(tr(context, 'localStorage'), style: Theme.of(context).textTheme.bodySmall),
-                ]),
-              ),
-            ]),
-          ),
-          const SizedBox(height: 14),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.system_update_alt_rounded),
-                  title: Text(tr(context, 'updates'), style: const TextStyle(fontWeight: FontWeight.w800)),
-                  subtitle: Text(_updateStatus()),
-                ),
-                const SizedBox(height: 8),
-                Wrap(spacing: 10, runSpacing: 8, children: [
-                  OutlinedButton.icon(
-                    onPressed: _checkingUpdates || _downloadingUpdate ? null : () => _checkForUpdates(),
-                    icon: _checkingUpdates
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.refresh_rounded),
-                    label: Text(tr(context, 'checkForUpdates')),
-                  ),
-                  if (_availableUpdate != null)
-                    FilledButton.icon(
-                      onPressed: _downloadingUpdate ? null : _downloadAndInstallUpdate,
-                      icon: _downloadingUpdate
-                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.download_rounded),
-                      label: Text(_downloadingUpdate ? tr(context, 'verifyingUpdate') : tr(context, 'downloadAndInstall')),
-                    ),
-                ]),
-              ]),
-            ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth >= 820;
+              final navigation = _settingsNavigation(wide);
+              final panel = _settingsPanel(snapshot);
+              if (wide) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: 244, child: navigation),
+                    const SizedBox(width: 18),
+                    Expanded(child: panel),
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [navigation, const SizedBox(height: 12), panel],
+              );
+            },
           ),
         ],
       );
+
+  Widget _settingsNavigation(bool wide) {
+    final sections = <(String, IconData)>[
+      ('settingsGeneral', Icons.tune_rounded),
+      ('settingsBusiness', Icons.business_rounded),
+      ('appearance', Icons.palette_outlined),
+      ('languageRegion', Icons.translate_rounded),
+      ('currency', Icons.currency_exchange_rounded),
+      ('accountingSettings', Icons.account_balance_rounded),
+      ('salesSettings', Icons.point_of_sale_rounded),
+      ('inventorySettings', Icons.inventory_2_outlined),
+      ('smartImport', Icons.document_scanner_outlined),
+      ('backup', Icons.backup_outlined),
+      ('updates', Icons.system_update_alt_rounded),
+    ];
+    if (wide) {
+      return Card(
+        child: Column(
+          children: [
+            for (var index = 0; index < sections.length; index++)
+              ListTile(
+                dense: true,
+                selected: _settingsSectionIndex == index,
+                selectedTileColor: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.45),
+                leading: Icon(sections[index].$2, size: 20),
+                title: Text(tr(context, sections[index].$1), maxLines: 1, overflow: TextOverflow.ellipsis),
+                onTap: () => setState(() => _settingsSectionIndex = index),
+              ),
+          ],
+        ),
+      );
+    }
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (var index = 0; index < sections.length; index++) ...[
+            if (index > 0) const SizedBox(width: 8),
+            ChoiceChip(
+              avatar: Icon(sections[index].$2, size: 18),
+              label: Text(tr(context, sections[index].$1)),
+              selected: _settingsSectionIndex == index,
+              onSelected: (_) => setState(() => _settingsSectionIndex = index),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _settingsCard({
+    required String title,
+    required String subtitle,
+    required List<Widget> children,
+  }) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 5),
+              Text(subtitle, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              if (children.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                ...children,
+              ],
+            ],
+          ),
+        ),
+      );
+
+  Widget _settingsPanel(LedgerSnapshot snapshot) {
+    switch (_settingsSectionIndex) {
+      case 0:
+        return _settingsCard(
+          title: tr(context, 'settingsGeneral'),
+          subtitle: tr(context, 'settingsGeneralHint'),
+          children: [
+            Text('${tr(context, 'entries')}: ${snapshot.entries.length} · ${tr(context, 'accounts')}: ${snapshot.accounts.length} · ${tr(context, 'products')}: ${snapshot.products.length}'),
+            const SizedBox(height: 14),
+            FilledButton.tonalIcon(
+              onPressed: () => setState(() => _selectedIndex = 0),
+              icon: const Icon(Icons.dashboard_outlined),
+              label: Text(tr(context, 'openOverview')),
+            ),
+          ],
+        );
+      case 1:
+        return _settingsCard(
+          title: tr(context, 'settingsBusiness'),
+          subtitle: tr(context, 'businessInfoHint'),
+          children: [
+            TextField(
+              controller: _businessNameController,
+              decoration: InputDecoration(labelText: tr(context, 'businessName')),
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _saveBusinessName(),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: FilledButton.icon(
+                onPressed: _saveBusinessName,
+                icon: const Icon(Icons.save_outlined),
+                label: Text(tr(context, 'saveSettings')),
+              ),
+            ),
+          ],
+        );
+      case 2:
+        return _settingsCard(
+          title: tr(context, 'appearance'),
+          subtitle: tr(context, 'appearanceHint'),
+          children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: widget.settings.darkMode,
+              title: Text(tr(context, 'darkMode')),
+              subtitle: Text(tr(context, 'darkModeHint')),
+              onChanged: (value) => widget.onSettingsChanged(widget.settings.copyWith(darkMode: value)),
+            ),
+          ],
+        );
+      case 3:
+        return _settingsCard(
+          title: tr(context, 'languageRegion'),
+          subtitle: tr(context, 'languageRegionHint'),
+          children: [
+            SearchableSelect<String>(
+              id: 'settings-language',
+              label: tr(context, 'language'),
+              searchHint: tr(context, 'searchLanguages'),
+              emptyLabel: tr(context, 'noSearchResults'),
+              value: widget.settings.languageCode,
+              options: [
+                SearchableSelectOption(value: 'en', label: tr(context, 'english')),
+                SearchableSelectOption(value: 'fa', label: tr(context, 'persian')),
+              ],
+              onChanged: (value) {
+                if (value != null) widget.onSettingsChanged(widget.settings.copyWith(languageCode: value));
+              },
+            ),
+            const SizedBox(height: 8),
+            Text(tr(context, 'languageRestart'), style: Theme.of(context).textTheme.bodySmall),
+          ],
+        );
+      case 4:
+        return _settingsCard(
+          title: tr(context, 'currency'),
+          subtitle: tr(context, 'currencyHint'),
+          children: [
+            SearchableSelect<String>(
+              id: 'settings-currency',
+              label: tr(context, 'currency'),
+              searchHint: tr(context, 'searchCurrencies'),
+              emptyLabel: tr(context, 'noSearchResults'),
+              value: widget.settings.currencyCode,
+              options: const [
+                SearchableSelectOption(value: 'USD', label: 'USD · US Dollar'),
+                SearchableSelectOption(value: 'EUR', label: 'EUR · Euro'),
+                SearchableSelectOption(value: 'GBP', label: 'GBP · Pound sterling'),
+                SearchableSelectOption(value: 'CAD', label: 'CAD · Canadian dollar'),
+                SearchableSelectOption(value: 'AUD', label: 'AUD · Australian dollar'),
+                SearchableSelectOption(value: 'AED', label: 'AED · UAE dirham'),
+              ],
+              onChanged: (value) {
+                if (value != null) widget.onSettingsChanged(widget.settings.copyWith(currencyCode: value));
+              },
+              autoOpen: const String.fromEnvironment('LEDGERLINE_VISUAL_SCENARIO') == 'currency-popup',
+            ),
+          ],
+        );
+      case 5:
+        return _settingsCard(
+          title: tr(context, 'accountingSettings'),
+          subtitle: tr(context, 'journalHint'),
+          children: [
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: () => setState(() => _selectedIndex = 2),
+                  icon: const Icon(Icons.account_tree_outlined),
+                  label: Text(tr(context, 'chartTitle')),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => setState(() => _selectedIndex = 5),
+                  icon: const Icon(Icons.analytics_outlined),
+                  label: Text(tr(context, 'reports')),
+                ),
+              ],
+            ),
+          ],
+        );
+      case 6:
+        return _settingsCard(
+          title: tr(context, 'salesSettings'),
+          subtitle: tr(context, 'invoiceHint'),
+          children: [
+            Text('${snapshot.invoices.length} ${tr(context, 'invoices').toLowerCase()}'),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: () => setState(() => _selectedIndex = 4),
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  label: Text(tr(context, 'openInvoices')),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _addInvoice(snapshot),
+                  icon: const Icon(Icons.add_rounded),
+                  label: Text(tr(context, 'newInvoice')),
+                ),
+              ],
+            ),
+          ],
+        );
+      case 7:
+        return _settingsCard(
+          title: tr(context, 'inventorySettings'),
+          subtitle: tr(context, 'productsHint'),
+          children: [
+            Text('${snapshot.products.length} ${tr(context, 'products').toLowerCase()}'),
+            const SizedBox(height: 12),
+            FilledButton.tonalIcon(
+              onPressed: () => setState(() => _selectedIndex = 3),
+              icon: const Icon(Icons.inventory_2_outlined),
+              label: Text(tr(context, 'openInventory')),
+            ),
+          ],
+        );
+      case 8:
+        return _settingsCard(
+          title: tr(context, 'smartImport'),
+          subtitle: tr(context, 'smartImportDescription'),
+          children: [
+            Text(tr(context, 'ocrPrivacy'), style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 12),
+            FilledButton.tonalIcon(
+              onPressed: () => setState(() => _selectedIndex = 6),
+              icon: const Icon(Icons.document_scanner_outlined),
+              label: Text(tr(context, 'openSmartImport')),
+            ),
+          ],
+        );
+      case 9:
+        return _settingsCard(
+          title: tr(context, 'backup'),
+          subtitle: tr(context, 'backupDescription'),
+          children: [
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: _exportBackup,
+                  icon: const Icon(Icons.save_alt_rounded),
+                  label: Text(tr(context, 'exportBackup')),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _restoringBackup ? null : _restoreBackup,
+                  icon: _restoringBackup
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.restore_rounded),
+                  label: Text(tr(context, 'restoreBackup')),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(tr(context, 'localStorage'), style: Theme.of(context).textTheme.bodySmall),
+          ],
+        );
+      case 10:
+        return _settingsCard(
+          title: tr(context, 'updates'),
+          subtitle: _updateStatus(),
+          children: [
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _checkingUpdates || _downloadingUpdate ? null : () => _checkForUpdates(),
+                  icon: _checkingUpdates
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.refresh_rounded),
+                  label: Text(tr(context, 'checkForUpdates')),
+                ),
+                if (_availableUpdate != null)
+                  FilledButton.icon(
+                    onPressed: _downloadingUpdate ? null : _downloadAndInstallUpdate,
+                    icon: _downloadingUpdate
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.download_rounded),
+                    label: Text(_downloadingUpdate ? tr(context, 'verifyingUpdate') : tr(context, 'downloadAndInstall')),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(tr(context, 'updateInfo'), style: Theme.of(context).textTheme.bodySmall),
+          ],
+        );
+      default:
+        return const SizedBox.shrink();
+    }
+  }
 
   Widget _smartImport(LedgerSnapshot snapshot) => _SmartImportPanel(
         repository: widget.repository,
