@@ -66,7 +66,19 @@ jobs:
         run: flutter pub get
       - name: Install Tesseract runtime
         shell: pwsh
-        run: choco install tesseract --yes --no-progress
+        run: |
+          $tesseractVersion = '5.5.3.20260724'
+          $installerPath = Join-Path $env:RUNNER_TEMP ('tesseract-ocr-w64-setup-' + $tesseractVersion + '.exe')
+          $installerUrl = 'https://github.com/tesseract-ocr/tesseract/releases/download/5.5.3/tesseract-ocr-w64-setup-' + $tesseractVersion + '.exe'
+          Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
+          $installer = Start-Process -FilePath $installerPath -ArgumentList '/S' -Wait -PassThru
+          if ($installer.ExitCode -ne 0) { throw "Tesseract installer exited with code $($installer.ExitCode)." }
+          $tesseractCandidates = @(
+            (Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles')) 'Tesseract-OCR/tesseract.exe'),
+            (Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Tesseract-OCR/tesseract.exe')
+          )
+          $installedTesseract = $tesseractCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $installedTesseract) { throw 'Pinned Tesseract installer did not install tesseract.exe.' }
       - name: Read application version
         shell: pwsh
         run: |
