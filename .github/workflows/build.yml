@@ -158,6 +158,26 @@ jobs:
             [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr handle, int command);
           }
           "@
+          $smokeInstallDirectory = Join-Path $env:RUNNER_TEMP 'LedgerlineInstallerSmoke'
+          $installerPath = Join-Path $PWD 'installer/output/ledgerline-windows-setup.exe'
+          $setup = Start-Process -FilePath $installerPath -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$smokeInstallDirectory") -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "Windows installer exited with code $($setup.ExitCode)." }
+          $installedApplication = Join-Path $smokeInstallDirectory 'ledgerline.exe'
+          if (-not (Test-Path -LiteralPath $installedApplication)) { throw 'Installer did not place ledgerline.exe in the selected install directory.' }
+          $smokeProcess = Start-Process -FilePath $installedApplication -PassThru
+          for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            Start-Sleep -Seconds 1
+            $smokeProcess.Refresh()
+            if ($smokeProcess.HasExited) { throw 'Installed Ledgerline exited during smoke-test startup.' }
+            if ($smokeProcess.MainWindowHandle -ne [IntPtr]::Zero) { break }
+          }
+          $smokeProcess.Refresh()
+          if ($smokeProcess.MainWindowHandle -eq [IntPtr]::Zero) { throw 'Installed Ledgerline did not create a Windows application window.' }
+          [LedgerlineWindowTest]::SetForegroundWindow($smokeProcess.MainWindowHandle) | Out-Null
+          Start-Sleep -Seconds 2
+          $smokeProcess.CloseMainWindow() | Out-Null
+          if (-not $smokeProcess.WaitForExit(10000)) { throw 'Installed Ledgerline did not close cleanly after the smoke test.' }
+          $smokeProcess.Dispose()
           $evidenceDirectory = Join-Path $PWD 'ui-evidence'
           New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
           $scenarios = @('titlebar', 'settings-light', 'settings-dark', 'settings-fa', 'currency-popup')
