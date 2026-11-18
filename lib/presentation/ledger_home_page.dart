@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' as io;
 
 import 'package:flutter/foundation.dart';
@@ -18,6 +19,7 @@ import '../domain/accounting_engine.dart';
 import '../domain/ledger_entry.dart';
 import '../domain/money.dart';
 import '../domain/product.dart';
+import '../domain/product_csv_import.dart';
 import '../domain/sales_invoice.dart';
 import '../services/offline_ocr_service.dart';
 import '../services/update_service.dart';
@@ -2332,6 +2334,8 @@ class _InvoiceLineFields {
   final TextEditingController quantity = TextEditingController(text: '1');
 }
 
+enum _SmartImportMode { journal, products }
+
 class _SmartImportPanel extends StatefulWidget {
   const _SmartImportPanel({
     required this.repository,
@@ -2353,9 +2357,14 @@ class _SmartImportPanelState extends State<_SmartImportPanel> {
   final _csv = TextEditingController();
   final _recognizedText = TextEditingController();
   List<JournalDraft> _preview = [];
+  ProductCsvImportResult? _productImport;
+  Map<ProductImportField, int?> _productMapping = {};
+  Set<String> _productConflicts = {};
   String? _error;
   bool _busy = false;
   bool _ocrBusy = false;
+  bool _mappingConfigured = false;
+  _SmartImportMode _mode = _SmartImportMode.journal;
 
   @override
   void dispose() {
@@ -2402,14 +2411,24 @@ class _SmartImportPanelState extends State<_SmartImportPanel> {
                     child: TextButton.icon(
                       onPressed: () {
                         _csv.text = _recognizedText.text;
-                        setState(() => _error = null);
+                        setState(() {
+                          _error = null;
+                          _clearPreviews();
+                        });
                       },
                       icon: const Icon(Icons.content_copy_rounded),
                       label: Text(tr(context, 'useRecognizedText')),
                     ),
                   ),
                 ],
-                if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      _error!,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    ),
+                  ),
               ]),
             ),
           ),
@@ -2418,30 +2437,113 @@ class _SmartImportPanelState extends State<_SmartImportPanel> {
             child: Padding(
               padding: const EdgeInsets.all(18),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(tr(context, 'smartImportTitle'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                Text(
+                  _mode == _SmartImportMode.journal
+                      ? tr(context, 'smartImportTitle')
+                      : tr(context, 'productCsvTitle'),
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                ),
                 const SizedBox(height: 8),
-                Text(tr(context, 'smartImportDescription')),
-                const SizedBox(height: 8),
-                Text(tr(context, 'csvFormat'), style: Theme.of(context).textTheme.bodySmall),
+                Text(
+                  _mode == _SmartImportMode.journal
+                      ? tr(context, 'smartImportDescription')
+                      : tr(context, 'productCsvHint'),
+                ),
                 const SizedBox(height: 14),
-                TextField(controller: _csv, minLines: 5, maxLines: 9, decoration: InputDecoration(labelText: tr(context, 'pasteCsv'), alignLabelWithHint: true)),
-                if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+                SegmentedButton<_SmartImportMode>(
+                  segments: [
+                    ButtonSegment(
+                      value: _SmartImportMode.journal,
+                      icon: const Icon(Icons.account_balance_outlined),
+                      label: Text(tr(context, 'journalTitle')),
+                    ),
+                    ButtonSegment(
+                      value: _SmartImportMode.products,
+                      icon: const Icon(Icons.inventory_2_outlined),
+                      label: Text(tr(context, 'productsTitle')),
+                    ),
+                  ],
+                  selected: {_mode},
+                  onSelectionChanged: (selection) {
+                    setState(() {
+                      _mode = selection.first;
+                      _error = null;
+                    });
+                  },
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  _mode == _SmartImportMode.journal
+                      ? tr(context, 'csvFormat')
+                      : tr(context, 'productCsvColumns'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
                 const SizedBox(height: 12),
-                Wrap(spacing: 10, children: [
-                  OutlinedButton.icon(onPressed: _previewImport, icon: const Icon(Icons.manage_search), label: Text(tr(context, 'previewImport'))),
-                  FilledButton.icon(onPressed: _busy || _preview.isEmpty ? null : _import, icon: const Icon(Icons.file_download_done), label: Text(tr(context, 'importRows'))),
+                TextField(
+                  controller: _csv,
+                  minLines: 5,
+                  maxLines: 9,
+                  onChanged: (_) {
+                    if (_preview.isNotEmpty || _productImport != null || _mappingConfigured) {
+                      setState(_clearPreviews);
+                    }
+                  },
+                  decoration: InputDecoration(
+                    labelText: _mode == _SmartImportMode.journal
+                        ? tr(context, 'pasteCsv')
+                        : tr(context, 'pasteProductCsv'),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(spacing: 10, runSpacing: 8, children: [
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _pickCsv,
+                    icon: const Icon(Icons.upload_file_rounded),
+                    label: Text(tr(context, 'chooseCsvFile')),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _previewImport,
+                    icon: const Icon(Icons.manage_search),
+                    label: Text(tr(context, 'previewImport')),
+                  ),
+                  if (_mode == _SmartImportMode.journal)
+                    FilledButton.icon(
+                      onPressed: _busy || _preview.isEmpty ? null : _importJournal,
+                      icon: const Icon(Icons.file_download_done),
+                      label: Text(tr(context, 'importRows')),
+                    )
+                  else
+                    FilledButton.icon(
+                      onPressed: _busy || !_canImportProducts ? null : _importProducts,
+                      icon: _busy
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.inventory_2_outlined),
+                      label: Text(tr(context, 'importProducts')),
+                    ),
                 ]),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      _error!,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    ),
+                  ),
               ]),
             ),
           ),
-          if (_preview.isNotEmpty) ...[
+          if (_mode == _SmartImportMode.journal && _preview.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Text('${tr(context, 'importPreview')} · ${_preview.length} ${tr(context, 'rowsReady')}', style: const TextStyle(fontWeight: FontWeight.w800)),
+            Text(
+              tr(context, 'importPreview') + ' · ' + _preview.length.toString() + ' ' + tr(context, 'rowsReady'),
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
             const SizedBox(height: 8),
             _EntryList(entries: [
               for (var index = 0; index < _preview.length; index++)
                 LedgerEntry(
-                  id: 'preview_$index',
+                  id: 'preview_' + index.toString(),
                   date: _preview[index].date,
                   description: _preview[index].description,
                   amountCents: _preview[index].amountCents,
@@ -2450,14 +2552,228 @@ class _SmartImportPanelState extends State<_SmartImportPanel> {
                 ),
             ], emptyMessage: tr(context, 'noImportRows'), currencyCode: widget.currencyCode),
           ],
+          if (_mode == _SmartImportMode.products && _productImport != null)
+            _buildProductPreview(_productImport!),
         ],
       );
+
+  bool get _canImportProducts {
+    final result = _productImport;
+    if (result == null || result.rows.isEmpty || result.invalidCount > 0) return false;
+    for (final draft in result.validDrafts) {
+      if (_productConflicts.contains('sku:' + draft.sku.toUpperCase()) ||
+          (draft.barcode.isNotEmpty &&
+              _productConflicts.contains('barcode:' + draft.barcode))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _clearPreviews() {
+    _preview = [];
+    _productImport = null;
+    _productConflicts = {};
+    _productMapping = {};
+    _mappingConfigured = false;
+  }
+
+  Widget _buildProductPreview(ProductCsvImportResult result) {
+    final theme = Theme.of(context);
+    final visibleRows = result.rows.take(20).toList(growable: false);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+        Text(
+          tr(context, 'productImportPreview') + ' · ' +
+              result.validCount.toString() + '/' + result.rows.length.toString(),
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(tr(context, 'detectedColumns'), style: theme.textTheme.titleSmall),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  for (final field in ProductImportField.values)
+                    SizedBox(
+                      width: 220,
+                      child: _productColumnPicker(field, result.headers),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (result.invalidCount > 0)
+                Text(
+                  tr(context, 'invalidProductRows') + ': ' + result.invalidCount.toString(),
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+              if (_productConflicts.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    tr(context, 'duplicateProductIdentifiers') + ': ' +
+                        _productConflicts.length.toString(),
+                    style: TextStyle(color: theme.colorScheme.error),
+                  ),
+                ),
+              const Divider(height: 24),
+              for (final row in visibleRows)
+                _buildProductPreviewRow(row),
+              if (result.rows.length > visibleRows.length)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    tr(context, 'showingFirstRows') + ' ' +
+                        visibleRows.length.toString() + '/' + result.rows.length.toString(),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+            ]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _productColumnPicker(
+    ProductImportField field,
+    List<String> headers,
+  ) {
+    final selectedColumn = _productMapping[field];
+    return SearchableSelect<int>(
+      id: 'product-import-' + field.name,
+      label: _productFieldLabel(field),
+      searchHint: tr(context, 'search'),
+      emptyLabel: tr(context, 'noSearchResults'),
+      options: [
+        SearchableSelectOption<int>(
+          value: -1,
+          label: tr(context, 'columnNotMapped'),
+        ),
+        for (var index = 0; index < headers.length; index++)
+          SearchableSelectOption<int>(
+            value: index,
+            label: headers[index].isEmpty
+                ? tr(context, 'unnamedColumn') + ' ' + (index + 1).toString()
+                : headers[index],
+            searchText: headers[index],
+          ),
+      ],
+      value: selectedColumn ?? -1,
+      maxPopupWidth: 340,
+      onChanged: (value) {
+        if (value == null) return;
+        setState(() {
+          _mappingConfigured = true;
+          if (value < 0) {
+            _productMapping.remove(field);
+          } else {
+            _productMapping[field] = value;
+          }
+          _productImport = null;
+          _productConflicts = {};
+          _error = null;
+        });
+      },
+    );
+  }
+
+  String _productFieldLabel(ProductImportField field) {
+    switch (field) {
+      case ProductImportField.sku:
+        return tr(context, 'sku');
+      case ProductImportField.name:
+        return tr(context, 'productName');
+      case ProductImportField.sellingPrice:
+        return tr(context, 'sellingPrice');
+      case ProductImportField.unitCost:
+        return tr(context, 'unitCost');
+      case ProductImportField.stockQuantity:
+        return tr(context, 'stockOnHand');
+      case ProductImportField.description:
+        return tr(context, 'productDescription');
+      case ProductImportField.category:
+        return tr(context, 'productCategory');
+      case ProductImportField.barcode:
+        return tr(context, 'productBarcode');
+    }
+  }
+
+  Widget _buildProductPreviewRow(ProductCsvImportRow row) {
+    final theme = Theme.of(context);
+    final draft = row.draft;
+    final existing = draft != null &&
+        (_productConflicts.contains('sku:' + draft.sku.toUpperCase()) ||
+            (draft.barcode.isNotEmpty &&
+                _productConflicts.contains('barcode:' + draft.barcode)));
+    final problem = row.issue ??
+        (existing ? tr(context, 'duplicateProductIdentifiers') : null);
+    final detail = draft == null
+        ? tr(context, 'invalidProductRow')
+        : draft.sku + ' · ' + draft.name + ' · ' +
+            CurrencyDefinition.of(widget.currencyCode)
+                .formatMinorUnits(draft.unitPriceCents);
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(
+        problem == null ? Icons.check_circle_outline_rounded : Icons.error_outline_rounded,
+        color: problem == null ? theme.colorScheme.primary : theme.colorScheme.error,
+      ),
+      title: Text(
+        detail,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: problem == null
+          ? Text(tr(context, 'csvRow') + ' ' + row.lineNumber.toString())
+          : Text(
+              tr(context, 'csvRow') + ' ' + row.lineNumber.toString() + ' · ' + problem,
+              style: TextStyle(color: theme.colorScheme.error),
+            ),
+    );
+  }
 
   String _accountName(String id) {
     for (final account in widget.accounts) {
       if (account.id == id) return account.name;
     }
     return id;
+  }
+
+  Future<void> _pickCsv() async {
+    try {
+      final selected = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv', 'txt'],
+        withData: true,
+      );
+      if (selected == null || selected.files.isEmpty || !mounted) return;
+      final file = selected.files.single;
+      final contents = file.bytes != null
+          ? utf8.decode(file.bytes!, allowMalformed: false)
+          : file.path == null
+              ? null
+              : await io.File(file.path!).readAsString();
+      if (contents == null) {
+        setState(() => _error = tr(context, 'fileCouldNotBeRead'));
+        return;
+      }
+      setState(() {
+        _csv.text = contents;
+        _clearPreviews();
+        _error = null;
+      });
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = tr(context, 'fileCouldNotBeRead') + ': ' + error.toString());
+    }
   }
 
   Future<void> _pickAndRecognize() async {
@@ -2481,36 +2797,67 @@ class _SmartImportPanelState extends State<_SmartImportPanel> {
         if (text.trim().isEmpty) _error = tr(context, 'ocrEmpty');
       });
     } on Object catch (error) {
-      if (mounted) setState(() => _error = '${tr(context, 'ocrFailed')}: $error');
+      if (mounted) setState(() => _error = tr(context, 'ocrFailed') + ': ' + error.toString());
     } finally {
       if (mounted) setState(() => _ocrBusy = false);
     }
   }
 
   void _previewImport() {
+    if (_mode == _SmartImportMode.products) {
+      unawaited(_previewProducts());
+    } else {
+      _previewJournalEntries();
+    }
+  }
+
+  void _previewJournalEntries() {
     try {
       final drafts = <JournalDraft>[];
-      final accountsByCode = {for (final account in widget.accounts) account.code.toLowerCase(): account};
-      final accountsById = {for (final account in widget.accounts) account.id.toLowerCase(): account};
+      final accountsByCode = {
+        for (final account in widget.accounts) account.code.toLowerCase(): account,
+      };
+      final accountsById = {
+        for (final account in widget.accounts) account.id.toLowerCase(): account,
+      };
       final rows = _csv.text.split(RegExp(r'\r?\n'));
       for (var index = 0; index < rows.length; index++) {
         final row = rows[index].trim();
         if (row.isEmpty) continue;
         if (index == 0 && row.toLowerCase().startsWith('date,')) continue;
         final fields = row.split(',').map((field) => field.trim()).toList();
-        if (fields.length != 5) throw FormatException('Row ${index + 1}: expected five comma-separated fields.');
-        final date = DateTime.tryParse(fields[0]);
-        final cents = _EntryDialogState._parseCents(fields[2], currencyCode: widget.currencyCode);
-        final debit = accountsByCode[fields[3].toLowerCase()] ?? accountsById[fields[3].toLowerCase()];
-        final credit = accountsByCode[fields[4].toLowerCase()] ?? accountsById[fields[4].toLowerCase()];
-        if (date == null || cents == null || cents <= 0 || fields[1].isEmpty || debit == null || credit == null) {
-          throw FormatException('Row ${index + 1}: invalid date, description, amount, or account.');
+        if (fields.length != 5) {
+          throw FormatException('Row ' + (index + 1).toString() + ': expected five comma-separated fields.');
         }
-        drafts.add(JournalDraft(date: date, description: fields[1], amountCents: cents, debitAccountId: debit.id, creditAccountId: credit.id));
+        final date = DateTime.tryParse(fields[0]);
+        final cents = _EntryDialogState._parseCents(
+          fields[2],
+          currencyCode: widget.currencyCode,
+        );
+        final debit = accountsByCode[fields[3].toLowerCase()] ??
+            accountsById[fields[3].toLowerCase()];
+        final credit = accountsByCode[fields[4].toLowerCase()] ??
+            accountsById[fields[4].toLowerCase()];
+        if (date == null ||
+            cents == null ||
+            cents <= 0 ||
+            fields[1].isEmpty ||
+            debit == null ||
+            credit == null) {
+          throw FormatException('Row ' + (index + 1).toString() + ': invalid date, description, amount, or account.');
+        }
+        drafts.add(JournalDraft(
+          date: date,
+          description: fields[1],
+          amountCents: cents,
+          debitAccountId: debit.id,
+          creditAccountId: credit.id,
+        ));
       }
       if (drafts.isEmpty) throw const FormatException('No valid rows to import.');
       setState(() {
         _preview = drafts;
+        _productImport = null;
         _error = null;
       });
     } on FormatException catch (error) {
@@ -2521,16 +2868,82 @@ class _SmartImportPanelState extends State<_SmartImportPanel> {
     }
   }
 
-  Future<void> _import() async {
+  Future<void> _previewProducts() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+      _productImport = null;
+      _productConflicts = {};
+    });
+    try {
+      Map<ProductImportField, int>? mapping;
+      if (_mappingConfigured) {
+        mapping = {
+          for (final entry in _productMapping.entries)
+            if (entry.value != null && entry.value! >= 0) entry.key: entry.value!,
+        };
+      }
+      final result = ProductCsvImport.parse(
+        _csv.text,
+        currencyCode: widget.currencyCode,
+        mapping: mapping,
+      );
+      final conflicts = await widget.repository.findProductImportConflicts(result.validDrafts);
+      if (!mounted) return;
+      setState(() {
+        _productImport = result;
+        _productConflicts = conflicts;
+        _productMapping = {
+          for (final entry in result.mapping.entries) entry.key: entry.value,
+        };
+        _mappingConfigured = true;
+      });
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _importJournal() async {
     setState(() => _busy = true);
     try {
       await widget.repository.createEntries(_preview);
       await widget.onImported();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${_preview.length} ${tr(context, 'imported')}')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_preview.length.toString() + ' ' + tr(context, 'imported')),
+        ),
+      );
       setState(() {
-        _preview = [];
         _csv.clear();
+        _clearPreviews();
+        _error = null;
+      });
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _importProducts() async {
+    final result = _productImport;
+    if (result == null || !_canImportProducts) return;
+    setState(() => _busy = true);
+    try {
+      final count = await widget.repository.importProducts(result.validDrafts);
+      await widget.onImported();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(count.toString() + ' ' + tr(context, 'productsImported')),
+        ),
+      );
+      setState(() {
+        _csv.clear();
+        _clearPreviews();
         _error = null;
       });
     } on Object catch (error) {

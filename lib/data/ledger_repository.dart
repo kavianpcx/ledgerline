@@ -140,6 +140,125 @@ class LedgerRepository {
     });
   }
 
+
+  /// Returns normalized identifiers that already exist in the catalog.
+  /// Reads are chunked so importing a large file stays below SQLite's bind limit.
+  Future<Set<String>> findProductImportConflicts(
+    List<ProductDraft> drafts,
+  ) async =>
+      _database.handle.transaction(
+        (txn) => _findProductImportConflictsInTransaction(txn, drafts),
+      );
+
+  /// Imports a catalog as a single unit. Products and their opening inventory
+  /// journals either all commit or all roll back.
+  Future<int> importProducts(List<ProductDraft> drafts) async {
+    if (drafts.isEmpty) {
+      throw ArgumentError('Choose at least one valid product to import.');
+    }
+    final skus = <String>{};
+    final barcodes = <String>{};
+    for (final draft in drafts) {
+      _validateProductDraft(draft);
+      final sku = draft.sku.trim().toUpperCase();
+      if (!skus.add(sku)) {
+        throw ArgumentError('Duplicate SKU in import: ' + sku);
+      }
+      final barcode = draft.barcode.trim();
+      if (barcode.isNotEmpty && !barcodes.add(barcode)) {
+        throw ArgumentError('Duplicate barcode in import: ' + barcode);
+      }
+    }
+
+    return _database.handle.transaction((txn) async {
+      await _requireAccountingCurrency(txn);
+      final conflicts = await _findProductImportConflictsInTransaction(txn, drafts);
+      if (conflicts.isNotEmpty) {
+        throw ArgumentError(
+          'Product identifiers already exist: ' + conflicts.join(', '),
+        );
+      }
+
+      final now = DateTime.now();
+      final timestamp = now.toUtc().toIso8601String();
+      for (var index = 0; index < drafts.length; index++) {
+        final draft = drafts[index];
+        final productId =
+            'product_import_' + now.microsecondsSinceEpoch.toString() + '_' + index.toString();
+        await txn.insert('products', {
+          'id': productId,
+          'sku': draft.sku.trim().toUpperCase(),
+          'name': draft.name.trim(),
+          'description': draft.description.trim(),
+          'category': draft.category.trim(),
+          'barcode': draft.barcode.trim(),
+          'unit_price_cents': draft.unitPriceCents,
+          'unit_cost_cents': draft.unitCostCents,
+          'stock_quantity': draft.stockQuantity,
+          'created_at': timestamp,
+          'updated_at': timestamp,
+        });
+
+        final openingValue = draft.unitCostCents * draft.stockQuantity;
+        if (openingValue > 0) {
+          await _insertTwoLineJournalEntry(
+            txn,
+            entryId: 'opening_' + productId,
+            date: now,
+            description: 'Opening stock · ' + draft.sku.trim().toUpperCase(),
+            debitAccountId: 'inventory',
+            creditAccountId: 'owner-equity',
+            amountCents: openingValue,
+          );
+        }
+      }
+      return drafts.length;
+    });
+  }
+
+  Future<Set<String>> _findProductImportConflictsInTransaction(
+    Transaction txn,
+    List<ProductDraft> drafts,
+  ) async {
+    final conflicts = <String>{};
+    const chunkSize = 300;
+    for (var start = 0; start < drafts.length; start += chunkSize) {
+      final end = start + chunkSize < drafts.length
+          ? start + chunkSize
+          : drafts.length;
+      final chunk = drafts.sublist(start, end);
+      final skus = chunk.map((draft) => draft.sku.trim().toUpperCase()).toSet();
+      final barcodes = chunk
+          .map((draft) => draft.barcode.trim())
+          .where((value) => value.isNotEmpty)
+          .toSet();
+      final predicates = <String>[];
+      final args = <Object?>[];
+      if (skus.isNotEmpty) {
+        predicates.add('UPPER(sku) IN (' + List.filled(skus.length, '?').join(',') + ')');
+        args.addAll(skus);
+      }
+      if (barcodes.isNotEmpty) {
+        predicates.add('barcode IN (' + List.filled(barcodes.length, '?').join(',') + ')');
+        args.addAll(barcodes);
+      }
+      if (predicates.isEmpty) continue;
+      final rows = await txn.rawQuery(
+        'SELECT sku, barcode FROM products WHERE ' + predicates.join(' OR '),
+        args,
+      );
+      for (final row in rows) {
+        final sku = (row['sku'] as String?)?.trim().toUpperCase() ?? '';
+        final barcode = (row['barcode'] as String?)?.trim() ?? '';
+        if (skus.contains(sku)) conflicts.add('sku:' + sku);
+        if (barcode.isNotEmpty && barcodes.contains(barcode)) {
+          conflicts.add('barcode:' + barcode);
+        }
+      }
+    }
+    return conflicts;
+  }
+
   Future<void> _insertBalancedEntry(Transaction txn, JournalDraft draft) async {
     final accountRows = await txn.query(
       'accounts',
