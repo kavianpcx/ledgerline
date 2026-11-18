@@ -164,6 +164,7 @@ jobs:
             [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr handle);
             [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr handle);
             [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr handle);
+            [DllImport("user32.dll", SetLastError = true)] public static extern bool MoveWindow(IntPtr handle, int x, int y, int width, int height, bool repaint);
             [StructLayout(LayoutKind.Sequential)] public struct Input {
               public uint type;
               public InputUnion data;
@@ -217,7 +218,7 @@ jobs:
           $smokeProcess.Dispose()
           $evidenceDirectory = Join-Path $PWD 'ui-evidence'
           New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
-          $scenarios = @('titlebar', 'settings-light', 'settings-dark', 'settings-fa', 'currency-popup')
+          $scenarios = @('titlebar', 'windows-sidebar-wide', 'windows-sidebar-medium', 'windows-sidebar-narrow', 'settings-light', 'settings-dark', 'settings-fa', 'currency-popup')
           foreach ($scenario in $scenarios) {
             Write-Host "Building visual scenario: $scenario"
             & flutter build windows --debug "--dart-define=LEDGERLINE_VISUAL_SCENARIO=$scenario"
@@ -259,12 +260,29 @@ jobs:
               Start-Sleep -Seconds 1
               if ([LedgerlineWindowTest]::IsIconic($process.MainWindowHandle)) { throw 'The Ledgerline window did not restore after minimizing.' }
             }
-            [LedgerlineWindowTest]::ShowWindow($process.MainWindowHandle, 3) | Out-Null
-            for ($attempt = 0; $attempt -lt 20; $attempt++) {
-              if ([LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { break }
-              Start-Sleep -Milliseconds 100
+            if ($scenario -like 'windows-sidebar-*') {
+              [LedgerlineWindowTest]::ShowWindow($process.MainWindowHandle, 9) | Out-Null
+              $windowWidth = switch ($scenario) {
+                'windows-sidebar-wide' { 1440 }
+                'windows-sidebar-medium' { 900 }
+                default { 620 }
+              }
+              $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+              $windowHeight = [Math]::Min(850, $screen.Height)
+              $windowX = [Math]::Max(0, [int](($screen.Width - $windowWidth) / 2))
+              $windowY = [Math]::Max(0, [int](($screen.Height - $windowHeight) / 2))
+              if (-not [LedgerlineWindowTest]::MoveWindow($process.MainWindowHandle, $windowX, $windowY, $windowWidth, $windowHeight, $true)) {
+                throw "Could not resize the application for $scenario."
+              }
+              Start-Sleep -Milliseconds 700
+            } else {
+              [LedgerlineWindowTest]::ShowWindow($process.MainWindowHandle, 3) | Out-Null
+              for ($attempt = 0; $attempt -lt 20; $attempt++) {
+                if ([LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { break }
+                Start-Sleep -Milliseconds 100
+              }
+              if (-not [LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { throw "The application window did not maximize for $scenario." }
             }
-            if (-not [LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { throw "The application window did not maximize for $scenario." }
             [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
             Start-Sleep -Seconds 3
             $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
