@@ -292,6 +292,7 @@ void main() {
       languageCode: 'fa',
       businessName: 'Backup Books',
       currencyCode: 'EUR',
+      desktopSidebarCollapsed: true,
     ));
     await sourceRepository.exportBackup(backupPath);
 
@@ -319,6 +320,7 @@ void main() {
     expect(settings.currencyCode, 'EUR');
     expect(settings.darkMode, isTrue);
     expect(settings.languageCode, 'fa');
+    expect(settings.desktopSidebarCollapsed, isTrue);
 
     final previousDatabase = await LedgerDatabase.open(recoveryPath);
     addTearDown(previousDatabase.close);
@@ -350,4 +352,19 @@ void main() {
     expect(snapshot.entries, hasLength(1));
     expect(snapshot.entries.single.description, 'Keep this entry');
   });
+  test('persists the desktop sidebar preference in application settings', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+
+    expect((await repository.loadAppSettings()).desktopSidebarCollapsed, isFalse);
+    await repository.saveAppSettings(
+      AppSettings.defaults.copyWith(desktopSidebarCollapsed: true),
+    );
+
+    final settings = await repository.loadAppSettings();
+    expect(settings.desktopSidebarCollapsed, isTrue);
+  });
+
 }
