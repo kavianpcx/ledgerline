@@ -141,7 +141,9 @@ void main() {
     expect(find.byTooltip('Products'), findsOneWidget);
     await tester.tap(find.byKey(const Key('desktop-sidebar-search-button')));
     await tester.pumpAndSettle();
-    final dialogSize = tester.getSize(find.byType(Dialog));
+    final dialogSize = tester.getSize(
+      find.byKey(const Key('desktop-navigation-search-dialog')),
+    );
     expect(dialogSize.width, lessThanOrEqualTo(280));
     expect(dialogSize.height, lessThanOrEqualTo(420));
     expect(tester.takeException(), isNull);

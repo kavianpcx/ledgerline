@@ -299,6 +299,7 @@ class _NavigationSearchDialogState extends State<_NavigationSearchDialog> {
 
     return Dialog(
       child: SizedBox(
+        key: const Key('desktop-navigation-search-dialog'),
         width: width,
         height: height,
         child: Padding(
