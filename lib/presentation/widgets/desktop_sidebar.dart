@@ -214,6 +214,7 @@ class _LedgerDesktopSidebarState extends State<LedgerDesktopSidebar> {
           color: selected ? colors.primaryContainer.withValues(alpha: 0.72) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
           child: InkWell(
+            key: Key('desktop-sidebar-destination-$index'),
             borderRadius: BorderRadius.circular(12),
             onTap: () => widget.onDestinationSelected(index),
             child: SizedBox(
@@ -222,7 +223,7 @@ class _LedgerDesktopSidebarState extends State<LedgerDesktopSidebar> {
                 mainAxisAlignment: collapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
                 children: [
                   SizedBox(
-                    width: collapsed ? 60 : 46,
+                    width: collapsed ? 56 : 46,
                     child: Icon(
                       selected ? destination.$2 : destination.$3,
                       size: 20,
@@ -286,6 +287,7 @@ class _LedgerDesktopSidebarState extends State<LedgerDesktopSidebar> {
                               itemBuilder: (context, index) {
                                 final entry = matches[index];
                                 return ListTile(
+                                  key: Key('desktop-navigation-search-result-${entry.key}'),
                                   leading: Icon(entry.value.$3),
                                   title: Text(tr(context, entry.value.$1)),
                                   onTap: () {
