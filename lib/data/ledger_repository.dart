@@ -453,6 +453,7 @@ class LedgerRepository {
     LedgerDatabase? stagedDatabase;
     var originalClosed = false;
     var originalMoved = false;
+    var stagedInstalled = false;
     try {
       try {
         final readOnlyDatabase = await databaseFactoryFfi.openDatabase(
@@ -484,6 +485,7 @@ class LedgerRepository {
           originalMoved = true;
         }
         await stagedFile.rename(targetPath);
+        stagedInstalled = true;
         final replacement = await LedgerDatabase.open(targetPath);
         try {
           await _validateBackup(replacement.handle);
@@ -495,7 +497,7 @@ class LedgerRepository {
         originalClosed = false;
         return originalMoved ? recoveryFile.path : null;
       } on Object {
-        if (await targetFile.exists()) await targetFile.delete();
+        if (stagedInstalled && await targetFile.exists()) await targetFile.delete();
         if (originalMoved && await recoveryFile.exists()) {
           await recoveryFile.rename(targetPath);
         }

@@ -26,7 +26,7 @@ flutter pub get
 flutter analyze
 flutter test --reporter expanded
 flutter run -d windows
-flutter build windows --release --dart-define=APP_VERSION=0.3.0
+flutter build windows --release --dart-define=APP_VERSION=0.3.1
 ```
 
 GitHub Actions runs analysis and tests on Ubuntu and builds the Windows release on `windows-latest`. The Windows job bundles Tesseract, pinned English/Persian models, their license files, and the installer. This repository intentionally does not build Android.
