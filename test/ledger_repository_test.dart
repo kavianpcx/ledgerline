@@ -12,11 +12,121 @@ import 'package:ledgerline/domain/sales_invoice.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('requires a confirmed base currency before monetary writes', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+
+    await expectLater(
+      repository.createEntry(JournalDraft(
+        date: DateTime(2026, 5, 1),
+        description: 'Blocked until currency setup',
+        amountCents: 100,
+        debitAccountId: 'cash',
+        creditAccountId: 'owner-equity',
+      )),
+      throwsStateError,
+    );
+
+    await repository.configureAccountingCurrency(
+      currencyCode: 'IRR',
+      confirmExistingAmounts: false,
+    );
+    expect((await repository.loadAppSettings()).accountingCurrencyConfigured, isTrue);
+    await repository.createEntry(JournalDraft(
+      date: DateTime(2026, 5, 1),
+      description: 'Rial opening balance',
+      amountCents: 100,
+      debitAccountId: 'cash',
+      creditAccountId: 'owner-equity',
+    ));
+    expect((await repository.loadSnapshot()).assetsCents, 100);
+  });
+
+  test('legacy currency confirmation checks all monetary records', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+
+    // The visible business tables are intentionally not loaded into a snapshot.
+    await database.handle.insert('products', {
+      'id': 'legacy-product',
+      'sku': 'LEGACY-COUNT',
+      'name': 'Legacy product',
+      'unit_price_cents': 300,
+      'unit_cost_cents': 150,
+      'stock_quantity': 1,
+      'created_at': DateTime.utc(2026, 1, 1).toIso8601String(),
+    });
+    expect(await repository.hasMonetaryRecords(), isTrue);
+    await expectLater(
+      repository.configureAccountingCurrency(
+        currencyCode: 'TOMAN',
+        confirmExistingAmounts: false,
+      ),
+      throwsStateError,
+    );
+    await repository.configureAccountingCurrency(
+      currencyCode: 'TOMAN',
+      confirmExistingAmounts: true,
+    );
+    expect((await repository.loadAppSettings()).currencyCode, 'TOMAN');
+  });
+
+  test('requires confirmation for legacy records and locks the base currency', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+
+    await database.handle.insert('products', {
+      'id': 'legacy-product',
+      'sku': 'LEGACY-1',
+      'name': 'Legacy product',
+      'unit_price_cents': 12500,
+      'unit_cost_cents': 7000,
+      'stock_quantity': 1,
+      'created_at': DateTime.utc(2026, 1, 1).toIso8601String(),
+    });
+
+    await expectLater(
+      repository.configureAccountingCurrency(
+        currencyCode: 'USD',
+        confirmExistingAmounts: false,
+      ),
+      throwsStateError,
+    );
+    expect((await repository.loadAppSettings()).accountingCurrencyConfigured, isFalse);
+
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    final persisted = await repository.loadAppSettings();
+    expect(persisted.accountingCurrencyConfigured, isTrue);
+    expect(persisted.currencyCode, 'USD');
+
+    await expectLater(
+      repository.configureAccountingCurrency(
+        currencyCode: 'EUR',
+        confirmExistingAmounts: true,
+      ),
+      throwsStateError,
+    );
+    expect((await repository.loadAppSettings()).currencyCode, 'USD');
+  });
+
   test('stores a balanced entry and rolls back entries for unknown accounts', () async {
     final database = await LedgerDatabase.openInMemory();
     addTearDown(database.close);
     final repository = LedgerRepository(database);
     await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
 
     await repository.createEntry(JournalDraft(
       date: DateTime(2026, 1, 5),
@@ -49,6 +159,10 @@ void main() {
     addTearDown(database.close);
     final repository = LedgerRepository(database);
     await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
 
     await repository.createAccount(const AccountDraft(
       code: '7200',
@@ -67,6 +181,10 @@ void main() {
     addTearDown(database.close);
     final repository = LedgerRepository(database);
     await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
     await repository.createProduct(const ProductDraft(
       sku: 'MUG-01',
       name: 'Ceramic mug',
@@ -108,6 +226,10 @@ void main() {
     addTearDown(database.close);
     final repository = LedgerRepository(database);
     await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
     await repository.createProduct(const ProductDraft(
       sku: 'MUG-PAY',
       name: 'Payment test mug',
@@ -216,6 +338,10 @@ void main() {
     addTearDown(migrated.close);
     final repository = LedgerRepository(migrated);
     await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
     final invoice = (await repository.loadSnapshot()).invoices.single;
     expect(invoice.status, 'paid');
     expect(invoice.paidCents, 5000);
@@ -231,6 +357,10 @@ void main() {
     addTearDown(database.close);
     final repository = LedgerRepository(database);
     await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
 
     expect((await repository.loadAppSettings()).languageCode, 'en');
     await repository.saveAppSettings(const AppSettings(
@@ -252,6 +382,10 @@ void main() {
     addTearDown(database.close);
     final repository = LedgerRepository(database);
     await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
     final directory = await Directory.systemTemp.createTemp('ledgerline-test-');
     addTearDown(() => directory.delete(recursive: true));
     final backupFile = File('${directory.path}${Platform.pathSeparator}ledgerline.sqlite');
@@ -280,6 +414,10 @@ void main() {
     addTearDown(sourceDatabase.close);
     final sourceRepository = LedgerRepository(sourceDatabase);
     await sourceRepository.initialize();
+    await sourceRepository.configureAccountingCurrency(
+      currencyCode: 'EUR',
+      confirmExistingAmounts: true,
+    );
     await sourceRepository.createEntry(JournalDraft(
       date: DateTime(2026, 4, 3),
       description: 'Entry from backup',
@@ -301,6 +439,10 @@ void main() {
     final currentRepository = LedgerRepository(currentDatabase);
     addTearDown(currentRepository.close);
     await currentRepository.initialize();
+    await currentRepository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
     await currentRepository.createEntry(JournalDraft(
       date: DateTime(2026, 4, 4),
       description: 'Entry before restore',
@@ -337,6 +479,10 @@ void main() {
     final repository = LedgerRepository(database);
     addTearDown(repository.close);
     await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
     await repository.createEntry(JournalDraft(
       date: DateTime(2026, 4, 5),
       description: 'Keep this entry',
@@ -357,6 +503,10 @@ void main() {
     addTearDown(database.close);
     final repository = LedgerRepository(database);
     await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
 
     expect((await repository.loadAppSettings()).desktopSidebarCollapsed, isFalse);
     await repository.saveAppSettings(

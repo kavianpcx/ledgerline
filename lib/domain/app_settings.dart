@@ -4,6 +4,7 @@ class AppSettings {
     required this.languageCode,
     this.businessName = '',
     this.currencyCode = 'USD',
+    this.accountingCurrencyConfigured = false,
     this.desktopSidebarCollapsed = false,
   });
 
@@ -16,6 +17,7 @@ class AppSettings {
   final String languageCode;
   final String businessName;
   final String currencyCode;
+  final bool accountingCurrencyConfigured;
   final bool desktopSidebarCollapsed;
 
   AppSettings copyWith({
@@ -23,12 +25,14 @@ class AppSettings {
     String? languageCode,
     String? businessName,
     String? currencyCode,
+    bool? accountingCurrencyConfigured,
     bool? desktopSidebarCollapsed,
   }) => AppSettings(
         darkMode: darkMode ?? this.darkMode,
         languageCode: languageCode ?? this.languageCode,
         businessName: businessName ?? this.businessName,
         currencyCode: currencyCode ?? this.currencyCode,
+        accountingCurrencyConfigured: accountingCurrencyConfigured ?? this.accountingCurrencyConfigured,
         desktopSidebarCollapsed: desktopSidebarCollapsed ?? this.desktopSidebarCollapsed,
       );
 }

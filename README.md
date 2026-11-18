@@ -1,34 +1,38 @@
 # Ledgerline
 
-Ledgerline is an offline-first accounting and business-management application in active development for Windows 10/11 and Android. The product target includes bookkeeping, retail POS, restaurant orders, inventory, document import, and optional secure device synchronization. The current verified release is Windows-only; the Android application and most advanced workflows are not yet implemented.
+Ledgerline is an offline-first accounting and business-management application in active development for Windows 10/11 and Android phones and tablets. The product target includes bookkeeping, retail POS, restaurant orders, inventory, document import, and optional secure device synchronization. The latest published build is a Windows-only prerelease. No Android build is available yet.
 
-The complete product requirements are in [docs/PRODUCT_SPECIFICATION.md](docs/PRODUCT_SPECIFICATION.md). The current code and risks are assessed in [docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md).
+The complete product requirements are in [docs/PRODUCT_SPECIFICATION.md](docs/PRODUCT_SPECIFICATION.md). The current code status, evidence, and risks are assessed in [docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md).
 
-## Current verified functionality
+## Verified Windows prerelease
 
-The existing Windows release provides:
+The current v0.5.1-beta.1 release provides a basic single-device Windows ledger with:
 
-- Local SQLite storage for accounts, journal entries/lines, products, invoices, invoice lines, invoice payments, and settings.
-- Integer minor-unit amounts and balanced journal posting for supported entries, inventory opening, sales, and invoice payments.
-- Dashboard, chart of accounts, journal, limited financial summaries, basic product/inventory screens, sales invoices, and partial invoice receipts.
-- English and Persian RTL, light/dark themes, persisted preferences, and a bounded searchable currency/language selector.
-- CSV import and local English/Persian Tesseract OCR that returns editable text for review.
-- SQLite backup export and integrity-checked restore with the previous database retained as a recovery copy.
-- A custom Windows caption area, keyboard shortcuts, Windows installer, and GitHub Actions build/test workflow.
+- Local SQLite storage for accounts, journal entries and lines, products, invoices, invoice lines, invoice payments, and application settings.
+- Integer arithmetic for recorded amounts and balanced journal posting for supported entries, inventory opening, sales, and invoice payments. Current reports are limited.
+- A dashboard, chart of accounts, journal, basic product/inventory screen, sales invoices, and partial invoice receipt workflow.
+- English and Persian RTL, light and dark themes, persisted preferences, and a bounded searchable currency selector. Currency selection in this release is not full multi-currency accounting or an exchange-rate conversion.
+- CSV import and offline English/Persian Tesseract OCR that extracts editable text. It does not yet classify documents or create products/accounting records from OCR results.
+- SQLite backup export and integrity-checked restore, keeping a recovery copy of the prior database.
+- An integrated Windows caption area, keyboard shortcuts, per-user installer, and GitHub Actions build/test workflow.
 
-The left Windows sidebar repair was merged in [PR #2](https://github.com/kavianpcx/ledgerline/pull/2). The successful [Windows workflow](https://github.com/kavianpcx/ledgerline/actions/runs/44306432838) built and smoke-installed the Windows installer, ran the test matrix, and captured wide, medium, and narrow sidebar plus title bar, theme, Persian, and currency-selector screenshots. The workflow artifacts are available from that run. High-DPI and Snap behavior have not been separately verified.
+PR [#2](https://github.com/kavianpcx/ledgerline/pull/2) restored permanent left-side Windows navigation at wide, medium, and narrow widths. The successful [PR workflow](https://github.com/kavianpcx/ledgerline/actions/runs/44306432838) built and smoke-installed the installer, ran the test matrix, and captured Windows sidebar and settings scenarios. The screenshots are retained as CI artifacts; they have not been manually pixel-reviewed in this workspace. High-DPI and Windows Snap behavior have not been separately verified.
 
-## Current limitations
+## Current development work
 
-The current published build is a basic single-device Windows ledger. It is not production-ready and does not provide Android builds, secure roles/authentication, multi-device synchronization, complete multi-currency accounting, restaurant table/kitchen workflows, full retail POS, warehouse movement accounting, structured XLSX/DOCX/PDF import, encrypted backups, payroll/tax rules, market data, or a complete updater. See the product audit for financial and security risks. The absence of a feature from the current build is not a change to the product target.
+The follow-on currency-safety work is being implemented on `feature/currency-safety`. It adds explicit base-currency setup, integer minor-unit parsing for decimal and zero-decimal currencies, legacy-data confirmation, and a service-layer guard against recording amounts before setup. It does not add exchange rates, mixed-currency invoices, conversion, or complete jurisdiction-aware currency support. This work is not included in the published v0.5.1-beta.1 installer.
+
+## Known limitations
+
+Ledgerline is not production-ready. The Android application, secure roles and authentication, multi-device synchronization, complete multi-currency accounting, restaurant table/kitchen workflows, full retail POS, warehouse movement accounting, XLSX/DOCX/PDF import, encrypted backups, payroll/tax rules, market data, and a complete updater remain unfinished. The product requirements stay active; see the audit for risks and implementation status.
 
 ## Install the verified Windows release
 
-Download the current Windows installer from [GitHub Releases](https://github.com/kavianpcx/ledgerline/releases), run it, then launch Ledgerline from the Start menu or desktop shortcut. The installer is per-user and does not require administrator privileges. Do not use this link as evidence that the in-progress sidebar repair or Android artifacts are released.
+Download the Windows prerelease from [GitHub Releases](https://github.com/kavianpcx/ledgerline/releases), run the installer, then launch Ledgerline from the Start menu or desktop shortcut. The per-user installer does not require administrator privileges. The release page does not contain an Android APK.
 
 ## Build and verify
 
-Use Flutter stable and Visual Studio 2022 with the Desktop development with C++ workload for Windows. CI uses GitHub-hosted Windows and Ubuntu runners. From the repository root:
+Use Flutter stable and Visual Studio 2022 with the Desktop development with C++ workload to build Windows locally. CI uses GitHub-hosted Windows and Ubuntu runners. From the repository root:
 
 ```powershell
 flutter pub get
@@ -38,19 +42,19 @@ flutter run -d windows
 flutter build windows --release
 ```
 
-The Windows Actions workflow builds and packages the Windows application, runs automated checks, and captures UI evidence. Android packaging and device-camera acceptance tests are not currently available.
+The Windows Actions workflow builds and packages the application, runs automated checks, and captures UI evidence. Android packaging and physical-device camera acceptance tests are not available yet.
 
 ## Local data, OCR, and updates
 
-Ledgerline stores its SQLite database in the operating system's application-support directory. Supported local business data remains on the device. Smart Import currently supports CSV plus offline image-to-text OCR; extracted text must be reviewed and is not automatically posted to accounting.
+Ledgerline stores its SQLite database in the operating system's application-support directory. Local business data remains on the device. Smart Import currently supports CSV plus offline image-to-text OCR; extracted text requires user review and is not automatically posted to the ledger.
 
-The partial update flow checks public GitHub Releases and validates the published asset digest before offering the installer. It is not a complete standalone updater: signed publisher verification, download progress/cancellation, install progress, rollback, and full recovery are not implemented.
+The update flow can discover GitHub Releases and check the published asset digest before offering the installer. It is not a complete standalone updater: publisher signature verification, genuine download progress and cancellation, install progress, rollback, and an older-to-newer end-to-end test are not implemented.
 
-Backups in the current release are not encrypted. Current installer packages are not Authenticode-signed. Do not store highly sensitive production data in this build.
+Backups in the published release are not encrypted, and installer packages are not Authenticode-signed. Do not use this prerelease for highly sensitive production data.
 
 ## Development status
 
-This repository is an evolving product. Feature work should preserve accounting history, use safe versioned schema migrations, and include tests for financial behavior. CI success is evidence only for the code paths exercised by that run. Release notes must identify actual artifacts and distinguish CI/emulator evidence from tests on Windows or physical Android hardware.
+This repository is evolving. Changes should preserve accounting history, use tested database migrations, and include automated coverage for financial behavior. A green workflow proves only the code paths exercised by that run. Release notes must identify actual artifacts and distinguish CI and emulator evidence from physical-device tests.
 
 ## License
 

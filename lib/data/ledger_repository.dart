@@ -8,6 +8,7 @@ import '../domain/ledger_entry.dart';
 import '../domain/product.dart';
 import '../domain/sales_invoice.dart';
 import '../domain/app_settings.dart';
+import '../domain/money.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'ledger_database.dart';
 
@@ -131,6 +132,7 @@ class LedgerRepository {
       AccountingEngine.validateDraft(draft);
     }
     await _database.handle.transaction((txn) async {
+      await _requireAccountingCurrency(txn);
       for (final draft in drafts) {
         await _insertBalancedEntry(txn, draft);
       }
@@ -185,6 +187,7 @@ class LedgerRepository {
     final now = DateTime.now();
     final productId = 'product_${now.microsecondsSinceEpoch}';
     await db.transaction((txn) async {
+      await _requireAccountingCurrency(txn);
       await txn.insert('products', {
         'id': productId,
         'sku': draft.sku.trim().toUpperCase(),
@@ -212,6 +215,7 @@ class LedgerRepository {
   Future<void> adjustStock(String productId, int delta) async {
     if (delta == 0) throw ArgumentError('Stock adjustment cannot be zero.');
     await _database.handle.transaction((txn) async {
+      await _requireAccountingCurrency(txn);
       final rows = await txn.query('products', where: 'id = ?', whereArgs: [productId]);
       if (rows.isEmpty) throw ArgumentError('Product not found.');
       final product = Product.fromRow(rows.first);
@@ -274,6 +278,7 @@ class LedgerRepository {
     }
 
     await _database.handle.transaction((txn) async {
+      await _requireAccountingCurrency(txn);
       final lines = <({Product product, int quantity, int lineTotal})>[];
       var subtotal = 0;
       var costTotal = 0;
@@ -378,6 +383,7 @@ class LedgerRepository {
     }
 
     await _database.handle.transaction((txn) async {
+      await _requireAccountingCurrency(txn);
       final invoiceRows = await txn.query(
         'sales_invoices',
         where: 'id = ?',
@@ -447,38 +453,126 @@ class LedgerRepository {
       currencyCode: _supportedCurrencies.contains(values['currency_code'])
           ? values['currency_code']!
           : 'USD',
+      accountingCurrencyConfigured: values['accounting_currency_configured'] == 'true',
       desktopSidebarCollapsed: values['desktop_sidebar_collapsed'] == 'true',
     );
   }
 
+  Future<void> configureAccountingCurrency({
+    required String currencyCode,
+    required bool confirmExistingAmounts,
+  }) async {
+    final normalizedCode = currencyCode.toUpperCase();
+    if (!_supportedCurrencies.contains(normalizedCode)) {
+      throw ArgumentError.value(currencyCode, 'currencyCode', 'Unsupported currency.');
+    }
+    await _database.handle.transaction((txn) async {
+      final rows = await txn.query(
+        'app_settings',
+        columns: ['setting_key', 'setting_value'],
+        where: "setting_key IN ('currency_code', 'accounting_currency_configured')",
+      );
+      final settings = {
+        for (final row in rows)
+          row['setting_key']! as String: row['setting_value']! as String,
+      };
+      final wasConfigured = settings['accounting_currency_configured'] == 'true';
+      final currentCode = settings['currency_code'] ?? 'USD';
+      final hasData = await _hasMonetaryData(txn);
+      if (hasData && !wasConfigured && !confirmExistingAmounts) {
+        throw StateError('Confirm how existing amounts should be interpreted before setting the base currency.');
+      }
+      if (hasData && wasConfigured && currentCode != normalizedCode) {
+        throw StateError('The base currency is locked after monetary records exist. Conversion is not available.');
+      }
+      await _writeAppSetting(txn, 'currency_code', normalizedCode);
+      await _writeAppSetting(txn, 'accounting_currency_configured', 'true');
+    });
+  }
+
+  Future<bool> _hasMonetaryData(DatabaseExecutor executor) async {
+    final rows = await executor.rawQuery('''
+      SELECT (SELECT COUNT(*) FROM products)
+           + (SELECT COUNT(*) FROM journal_entries)
+           + (SELECT COUNT(*) FROM sales_invoices)
+           + (SELECT COUNT(*) FROM invoice_payments) AS record_count
+    ''');
+    return (rows.single['record_count']! as int) > 0;
+  }
+
+  /// Reads the full ledger, not the recent-page snapshot, before legacy currency confirmation.
+  Future<bool> hasMonetaryRecords() => _hasMonetaryData(_database.handle);
+
+  Future<void> _requireAccountingCurrency(DatabaseExecutor executor) async {
+    final rows = await executor.query(
+      'app_settings',
+      columns: ['setting_value'],
+      where: 'setting_key = ?',
+      whereArgs: ['accounting_currency_configured'],
+      limit: 1,
+    );
+    if (rows.isEmpty || rows.single['setting_value'] != 'true') {
+      throw StateError('Choose and confirm a base accounting currency in Settings before recording monetary data.');
+    }
+  }
+
+  Future<void> _writeAppSetting(
+    DatabaseExecutor executor,
+    String key,
+    String value,
+  ) async {
+    await executor.insert(
+      'app_settings',
+      {'setting_key': key, 'setting_value': value},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
   Future<void> saveAppSettings(AppSettings settings) async {
-    final txn = _database.handle;
-    await txn.transaction((batch) async {
-      await batch.insert(
+    final database = _database.handle;
+    await database.transaction((txn) async {
+      final rows = await txn.query(
         'app_settings',
+        columns: ['setting_key', 'setting_value'],
+        where: "setting_key IN ('currency_code', 'accounting_currency_configured')",
+      );
+      final currentSettings = {
+        for (final row in rows)
+          row['setting_key']! as String: row['setting_value']! as String,
+      };
+      final currentCode = currentSettings['currency_code'] ?? 'USD';
+      final wasConfigured = currentSettings['accounting_currency_configured'] == 'true';
+      final hasData = await _hasMonetaryData(txn);
+      if (hasData &&
+          settings.currencyCode != currentCode &&
+          (wasConfigured || !settings.accountingCurrencyConfigured)) {
+        throw StateError('Use the currency confirmation workflow before changing the base currency.');
+      }
+      if (hasData && !wasConfigured && settings.accountingCurrencyConfigured) {
+        throw StateError('Use configureAccountingCurrency to confirm legacy amounts.');
+      }
+      final configured = wasConfigured ||
+          settings.accountingCurrencyConfigured ||
+          (!hasData && settings.currencyCode != currentCode);
+
+      await txn.insert('app_settings',
         {'setting_key': 'dark_mode', 'setting_value': '${settings.darkMode}'},
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-      await batch.insert(
-        'app_settings',
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
         {'setting_key': 'language_code', 'setting_value': settings.languageCode},
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-      await batch.insert(
-        'app_settings',
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
         {'setting_key': 'business_name', 'setting_value': settings.businessName.trim()},
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-      await batch.insert(
-        'app_settings',
-        {'setting_key': 'currency_code', 'setting_value': settings.currencyCode},
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-      await batch.insert(
-        'app_settings',
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
+        {'setting_key': 'currency_code', 'setting_value': settings.currencyCode.toUpperCase()},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
+        {'setting_key': 'accounting_currency_configured', 'setting_value': '${configured}'},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
         {'setting_key': 'desktop_sidebar_collapsed', 'setting_value': '${settings.desktopSidebarCollapsed}'},
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+        conflictAlgorithm: ConflictAlgorithm.replace);
     });
   }
 
@@ -632,7 +726,7 @@ class LedgerRepository {
     }
   }
 
-  static const _supportedCurrencies = {'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'AED'};
+  static const _supportedCurrencies = CurrencyDefinition.codes;
 
   static String _dateOnly(DateTime date) =>
       '${date.year.toString().padLeft(4, '0')}-'

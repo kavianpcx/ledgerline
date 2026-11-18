@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Require an explicit base accounting currency before recording monetary data.
+- Ask owners to confirm the currency of legacy records without changing amounts.
+- Lock base currency changes once monetary history exists.
+- Add integer-only amount parsing and formatting for decimal and zero-decimal currencies, including IRR and the internal TOMAN unit.
+- Add currency precision, Iranian unit conversion, and repository currency-safety tests.
+
+
 ## 0.5.1-beta.1
 
 Windows-only milestone prerelease.
