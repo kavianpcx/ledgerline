@@ -77,13 +77,13 @@ class ProductCsvImport {
     if (activeMapping.values.toSet().length != activeMapping.length) {
       throw const FormatException('Each product field must use a different CSV column.');
     }
-    for (final required in const [
+    for (final requiredField in const [
       ProductImportField.sku,
       ProductImportField.name,
       ProductImportField.sellingPrice,
     ]) {
-      if (!activeMapping.containsKey(required)) {
-        throw FormatException('Map the SKU, product name, and selling price columns.');
+      if (!activeMapping.containsKey(requiredField)) {
+        throw const FormatException('Map the SKU, product name, and selling price columns.');
       }
     }
 
