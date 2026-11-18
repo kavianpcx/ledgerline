@@ -10,6 +10,7 @@ class LedgerDesktopSidebar extends StatefulWidget {
     required this.destinations,
     required this.selectedIndex,
     required this.collapsed,
+    this.canToggleExpanded = true,
     required this.onDestinationSelected,
     required this.onCollapsedChanged,
   });
@@ -17,6 +18,7 @@ class LedgerDesktopSidebar extends StatefulWidget {
   final List<LedgerNavDestination> destinations;
   final int selectedIndex;
   final bool collapsed;
+  final bool canToggleExpanded;
   final ValueChanged<int> onDestinationSelected;
   final ValueChanged<bool> onCollapsedChanged;
 
@@ -85,7 +87,8 @@ class _LedgerDesktopSidebarState extends State<LedgerDesktopSidebar> {
                     ),
                   ),
                 ],
-                Tooltip(
+                if (widget.canToggleExpanded)
+                  Tooltip(
                   message: tr(context, expanded ? 'collapseNavigation' : 'expandNavigation'),
                   child: IconButton(
                     key: const Key('desktop-sidebar-toggle'),
