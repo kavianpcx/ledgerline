@@ -61,6 +61,11 @@ void main() {
     expect(rect.left, greaterThanOrEqualTo(0));
     expect(rect.right, lessThanOrEqualTo(1200));
     expect(tester.takeException(), isNull);
+    await tester.tap(
+      find.byKey(const ValueKey('searchable-select-trigger-settings-currency')),
+    );
+    await tester.pumpAndSettle();
+    expect(popup, findsNothing);
   });
 }
 
