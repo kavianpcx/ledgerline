@@ -295,6 +295,10 @@ void main() {
 
     expect((await repository.loadSnapshot()).invoices, isEmpty);
     expect((await repository.loadProducts()).single.stockQuantity, 5);
+    expect(
+      (await repository.loadStockMovementPage(productId: product.id)).totalCount,
+      1,
+    );
   });
 }
 

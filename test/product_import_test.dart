@@ -116,6 +116,19 @@ void main() {
     final snapshot = await repository.loadSnapshot();
     expect(snapshot.products, hasLength(2));
     expect(snapshot.entries, hasLength(2));
+    final stockMovements = await database.handle.query('stock_movements');
+    expect(stockMovements, hasLength(2));
+    expect(
+      stockMovements.map((movement) => movement['movement_type']).toSet(),
+      {'opening_balance'},
+    );
+    expect(
+      stockMovements.fold<int>(
+        0,
+        (total, movement) => total + (movement['quantity_delta']! as int),
+      ),
+      3,
+    );
     expect(snapshot.assetsCents, 1250);
     expect(snapshot.equityCents, 1250);
     expect(

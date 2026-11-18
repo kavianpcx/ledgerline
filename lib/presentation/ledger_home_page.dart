@@ -19,6 +19,7 @@ import '../domain/accounting_engine.dart';
 import '../domain/ledger_entry.dart';
 import '../domain/money.dart';
 import '../domain/product.dart';
+import '../domain/stock_movement.dart';
 import '../domain/product_csv_import.dart';
 import '../domain/sales_invoice.dart';
 import '../services/offline_ocr_service.dart';
@@ -358,6 +359,14 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
       if (mounted) _notify('Could not adjust stock: $error');
     }
   }
+
+  Future<void> _showStockMovementHistory(Product product) => showDialog<void>(
+        context: context,
+        builder: (context) => _StockMovementHistoryDialog(
+          repository: widget.repository,
+          product: product,
+        ),
+      );
 
   Future<void> _addInvoice(LedgerSnapshot snapshot) async {
     if (!_requireAccountingCurrency()) return;
@@ -1050,6 +1059,12 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                       _money(product.unitPriceCents, widget.settings.currencyCode),
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
+                  ),
+                  IconButton(
+                    key: ValueKey('product-stock-history-${product.sku}'),
+                    tooltip: tr(context, 'stockHistory'),
+                    onPressed: () => _showStockMovementHistory(product),
+                    icon: const Icon(Icons.history_rounded),
                   ),
                   IconButton(
                     tooltip: tr(context, 'restock'),
@@ -1915,6 +1930,150 @@ class _EntryDialogState extends State<_EntryDialog> {
         currencyCode: currencyCode,
       );
 }
+
+class _StockMovementHistoryDialog extends StatefulWidget {
+  const _StockMovementHistoryDialog({
+    required this.repository,
+    required this.product,
+  });
+
+  final LedgerRepository repository;
+  final Product product;
+
+  @override
+  State<_StockMovementHistoryDialog> createState() =>
+      _StockMovementHistoryDialogState();
+}
+
+class _StockMovementHistoryDialogState
+    extends State<_StockMovementHistoryDialog> {
+  static const _pageSize = 25;
+  late Future<StockMovementPage> _pageFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageFuture = _loadPage(0);
+  }
+
+  Future<StockMovementPage> _loadPage(int pageIndex) =>
+      widget.repository.loadStockMovementPage(
+        productId: widget.product.id,
+        pageIndex: pageIndex,
+        pageSize: _pageSize,
+      );
+
+  void _showPage(int pageIndex) {
+    setState(() => _pageFuture = _loadPage(pageIndex));
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text('${tr(context, 'stockMovementHistory')} · ${widget.product.name}'),
+        content: SizedBox(
+          width: 560,
+          height: 400,
+          child: FutureBuilder<StockMovementPage>(
+            future: _pageFuture,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Center(
+                  child: Text(
+                    tr(context, 'stockMovementLoadFailed') +
+                        ': ${snapshot.error}',
+                  ),
+                );
+              }
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final page = snapshot.data!;
+              if (page.totalCount == 0) {
+                return Center(child: Text(tr(context, 'noStockMovements')));
+              }
+              return Column(
+                children: [
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: page.movements.length,
+                      separatorBuilder: (context, index) =>
+                          const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final movement = page.movements[index];
+                        final isIncrease = movement.quantityDelta > 0;
+                        final timestamp = movement.recordedAt
+                            .toLocal()
+                            .toString()
+                            .split('.')
+                            .first;
+                        final label = switch (movement.movementType) {
+                          'opening_balance' =>
+                            tr(context, 'stockOpeningBalance'),
+                          'adjustment' => tr(context, 'stockAdjustment'),
+                          'sale' => tr(context, 'stockSale'),
+                          'migration_balance' =>
+                            tr(context, 'stockMigrationBalance'),
+                          _ => movement.movementType,
+                        };
+                        return ListTile(
+                          dense: true,
+                          leading: Icon(
+                            isIncrease
+                                ? Icons.add_circle_outline
+                                : Icons.remove_circle_outline,
+                            color: isIncrease
+                                ? Theme.of(context).colorScheme.tertiary
+                                : Theme.of(context).colorScheme.error,
+                          ),
+                          title: Text(label),
+                          subtitle: Text('${movement.description} · $timestamp'),
+                          trailing: Text(
+                            '${isIncrease ? '+' : ''}${movement.quantityDelta}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: isIncrease
+                                  ? Theme.of(context).colorScheme.tertiary
+                                  : Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        key: const Key('stock-history-previous-page'),
+                        tooltip: tr(context, 'previousPage'),
+                        onPressed: page.pageIndex == 0
+                            ? null
+                            : () => _showPage(page.pageIndex - 1),
+                        icon: const Icon(Icons.chevron_left_rounded),
+                      ),
+                      Text('${page.pageIndex + 1} / ${page.pageCount}'),
+                      IconButton(
+                        key: const Key('stock-history-next-page'),
+                        tooltip: tr(context, 'nextPage'),
+                        onPressed: page.pageIndex + 1 >= page.pageCount
+                            ? null
+                            : () => _showPage(page.pageIndex + 1),
+                        icon: const Icon(Icons.chevron_right_rounded),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(tr(context, 'stockHistoryClose')),
+          ),
+        ],
+      );
 
 class _ProductDialog extends StatefulWidget {
   const _ProductDialog({required this.currencyCode, this.product});

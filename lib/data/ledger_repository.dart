@@ -7,6 +7,7 @@ import '../domain/accounting_engine.dart';
 import '../domain/ledger_entry.dart';
 import '../domain/product.dart';
 import '../domain/sales_invoice.dart';
+import '../domain/stock_movement.dart';
 import '../domain/app_settings.dart';
 import '../domain/money.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -200,6 +201,20 @@ class LedgerRepository {
         });
 
         final openingValue = draft.unitCostCents * draft.stockQuantity;
+        if (draft.stockQuantity > 0) {
+          await _insertStockMovement(
+            txn,
+            productId: productId,
+            productSku: draft.sku.trim().toUpperCase(),
+            productName: draft.name.trim(),
+            movementType: 'opening_balance',
+            quantityDelta: draft.stockQuantity,
+            unitCostCents: draft.unitCostCents,
+            referenceId: openingValue > 0 ? 'opening_' + productId : '',
+            description: 'Opening stock · ' + draft.sku.trim().toUpperCase(),
+            occurredAt: now,
+          );
+        }
         if (openingValue > 0) {
           await _insertTwoLineJournalEntry(
             txn,
@@ -377,6 +392,47 @@ class LedgerRepository {
     });
   }
 
+  Future<StockMovementPage> loadStockMovementPage({
+    required String productId,
+    int pageIndex = 0,
+    int pageSize = 25,
+  }) async {
+    const allowedPageSizes = {10, 25, 50, 100};
+    if (productId.trim().isEmpty) {
+      throw ArgumentError.value(productId, 'productId');
+    }
+    if (!allowedPageSizes.contains(pageSize)) {
+      throw ArgumentError.value(pageSize, 'pageSize', 'Use 10, 25, 50, or 100.');
+    }
+    if (pageIndex < 0) throw ArgumentError.value(pageIndex, 'pageIndex');
+
+    return _database.handle.transaction((txn) async {
+      final countRows = await txn.rawQuery(
+        'SELECT COUNT(*) AS total_count FROM stock_movements WHERE product_id = ?',
+        [productId],
+      );
+      final totalCount = countRows.single['total_count']! as int;
+      final lastPageIndex =
+          totalCount == 0 ? 0 : (totalCount - 1) ~/ pageSize;
+      final safePageIndex =
+          pageIndex > lastPageIndex ? lastPageIndex : pageIndex;
+      final rows = await txn.query(
+        'stock_movements',
+        where: 'product_id = ?',
+        whereArgs: [productId],
+        orderBy: 'recorded_at DESC, id DESC',
+        limit: pageSize,
+        offset: safePageIndex * pageSize,
+      );
+      return StockMovementPage(
+        movements: rows.map(StockMovement.fromRow).toList(growable: false),
+        totalCount: totalCount,
+        pageIndex: safePageIndex,
+        pageSize: pageSize,
+      );
+    });
+  }
+
   Future<void> createProduct(ProductDraft draft) async {
     _validateProductDraft(draft);
     final db = _database.handle;
@@ -399,6 +455,20 @@ class LedgerRepository {
         'updated_at': timestamp,
       });
       final openingValue = draft.unitCostCents * draft.stockQuantity;
+      if (draft.stockQuantity > 0) {
+        await _insertStockMovement(
+          txn,
+          productId: productId,
+          productSku: draft.sku.trim().toUpperCase(),
+          productName: draft.name.trim(),
+          movementType: 'opening_balance',
+          quantityDelta: draft.stockQuantity,
+          unitCostCents: draft.unitCostCents,
+          referenceId: openingValue > 0 ? 'opening_' + productId : '',
+          description: 'Opening stock · ' + draft.sku.trim().toUpperCase(),
+          occurredAt: now,
+        );
+      }
       if (openingValue > 0) {
         await _insertTwoLineJournalEntry(
           txn,
@@ -500,18 +570,62 @@ class LedgerRepository {
         where: 'id = ?',
         whereArgs: [productId],
       );
+      final now = DateTime.now();
       final value = product.unitCostCents * delta.abs();
+      final entryId = 'stock_${now.microsecondsSinceEpoch}';
+      await _insertStockMovement(
+        txn,
+        productId: product.id,
+        productSku: product.sku,
+        productName: product.name,
+        movementType: 'adjustment',
+        quantityDelta: delta,
+        unitCostCents: product.unitCostCents,
+        referenceId: value > 0 ? entryId : '',
+        description: delta > 0 ? 'Restock · ${product.sku}' : 'Stock reduction · ${product.sku}',
+        occurredAt: now,
+      );
       if (value > 0) {
         await _insertTwoLineJournalEntry(
           txn,
-          entryId: 'stock_${DateTime.now().microsecondsSinceEpoch}',
-          date: DateTime.now(),
+          entryId: entryId,
+          date: now,
           description: delta > 0 ? 'Restock · ${product.sku}' : 'Stock reduction · ${product.sku}',
           debitAccountId: delta > 0 ? 'inventory' : 'inventory-shrinkage',
           creditAccountId: delta > 0 ? 'cash' : 'inventory',
           amountCents: value,
         );
       }
+    });
+  }
+
+  Future<void> _insertStockMovement(
+    Transaction txn, {
+    required String productId,
+    required String productSku,
+    required String productName,
+    required String movementType,
+    required int quantityDelta,
+    required int unitCostCents,
+    required String referenceId,
+    required String description,
+    required DateTime occurredAt,
+  }) async {
+    if (quantityDelta == 0) {
+      throw ArgumentError('Stock movement quantity cannot be zero.');
+    }
+    final recordedAt = DateTime.now().toUtc().toIso8601String();
+    await txn.insert('stock_movements', {
+      'product_id': productId,
+      'product_sku': productSku,
+      'product_name': productName,
+      'movement_type': movementType,
+      'quantity_delta': quantityDelta,
+      'unit_cost_cents': unitCostCents,
+      'reference_id': referenceId,
+      'description': description,
+      'occurred_at': occurredAt.toUtc().toIso8601String(),
+      'recorded_at': recordedAt,
     });
   }
 
@@ -644,6 +758,18 @@ class LedgerRepository {
           'unit_cost_cents': line.product.unitCostCents,
           'line_total_cents': line.lineTotal,
         });
+        await _insertStockMovement(
+          txn,
+          productId: line.product.id,
+          productSku: line.product.sku,
+          productName: line.product.name,
+          movementType: 'sale',
+          quantityDelta: -line.quantity,
+          unitCostCents: line.product.unitCostCents,
+          referenceId: invoiceId,
+          description: 'Invoice ' + invoiceNumber,
+          occurredAt: draft.date,
+        );
       }
 
       final journalId = 'journal_$invoiceId';

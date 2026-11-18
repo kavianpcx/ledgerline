@@ -12,7 +12,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 4,
+        version: 5,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -28,7 +28,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       inMemoryDatabasePath,
       options: OpenDatabaseOptions(
-        version: 4,
+        version: 5,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -78,6 +78,7 @@ class LedgerDatabase {
     await _createProductInvoiceAndSettingsTables(db);
     await _createInvoicePaymentsTable(db);
     await _upgradeProductsToV4(db);
+    await _createStockMovementsTable(db);
   }
 
   static Future<void> _upgradeSchema(
@@ -93,6 +94,9 @@ class LedgerDatabase {
     }
     if (oldVersion < 4) {
       await _upgradeProductsToV4(db);
+    }
+    if (oldVersion < 5) {
+      await _createStockMovementsTable(db, seedCurrentBalances: true);
     }
   }
 
@@ -139,6 +143,76 @@ class LedgerDatabase {
         "CREATE UNIQUE INDEX products_by_barcode ON products(barcode) WHERE barcode <> ''",
       );
     }
+  }
+
+  static Future<void> _createStockMovementsTable(
+    Database db, {
+    bool seedCurrentBalances = false,
+  }) async {
+    await db.execute('''
+      CREATE TABLE stock_movements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id TEXT NOT NULL,
+        product_sku TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        movement_type TEXT NOT NULL CHECK (
+          movement_type IN (
+            'opening_balance',
+            'adjustment',
+            'sale',
+            'migration_balance'
+          )
+        ),
+        quantity_delta INTEGER NOT NULL CHECK (quantity_delta <> 0),
+        unit_cost_cents INTEGER NOT NULL CHECK (unit_cost_cents >= 0),
+        reference_id TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        recorded_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX stock_movements_by_product ON stock_movements(product_id, recorded_at DESC, id DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX stock_movements_by_reference ON stock_movements(reference_id)',
+    );
+    await db.execute('''
+      CREATE TRIGGER stock_movements_reject_update
+      BEFORE UPDATE ON stock_movements
+      BEGIN
+        SELECT RAISE(ABORT, 'stock movements are append-only');
+      END
+    ''');
+    await db.execute('''
+      CREATE TRIGGER stock_movements_reject_delete
+      BEFORE DELETE ON stock_movements
+      BEGIN
+        SELECT RAISE(ABORT, 'stock movements are append-only');
+      END
+    ''');
+
+    if (!seedCurrentBalances) return;
+    await db.execute('''
+      INSERT INTO stock_movements (
+        product_id, product_sku, product_name, movement_type,
+        quantity_delta, unit_cost_cents, reference_id, description,
+        occurred_at, recorded_at
+      )
+      SELECT
+        id,
+        sku,
+        name,
+        'migration_balance',
+        stock_quantity,
+        unit_cost_cents,
+        '',
+        'Balance brought forward when stock history was introduced',
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      FROM products
+      WHERE stock_quantity > 0
+    ''');
   }
 
   static Future<void> _createProductInvoiceAndSettingsTables(Database db) async {

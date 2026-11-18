@@ -18,6 +18,10 @@
 - Revalidate cart prices and stock before checkout, and reject changed prices again inside the SQLite sale transaction.
 - Post invoice, stock reduction, sales/COGS journals, and an optional full cash receipt atomically; unpaid checkout remains in receivables.
 - Add POS widget and repository coverage for cash and on-account checkout, balanced accounting, inventory reduction, stale prices, and cart clearing.
+- Add append-only stock movement records for opening stock, CSV imports, manual adjustments, and sales.
+- Migrate existing on-hand quantities as labeled balance-forward entries without changing ledger balances or inventing prior transactions.
+- Add indexed, database-paginated product stock history and prevent movement rows from being edited or deleted.
+- Verify stock history across migrations, imports, adjustments, sales, and failed checkout rollback.
 
 ## 0.5.1-beta.1
 

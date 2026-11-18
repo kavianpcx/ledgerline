@@ -710,8 +710,95 @@ void main() {
     expect(migrated['category'], '');
     expect(migrated['barcode'], '');
     expect(migrated['updated_at'], createdAt);
+    final movements = await upgraded.handle.query('stock_movements');
+    expect(movements, hasLength(1));
+    expect(movements.single['product_id'], 'legacy-1');
+    expect(movements.single['product_sku'], 'OLD-1');
+    expect(movements.single['product_name'], 'Legacy product');
+    expect(movements.single['movement_type'], 'migration_balance');
+    expect(movements.single['quantity_delta'], 7);
+    expect(movements.single['unit_cost_cents'], 456);
   });
 
+
+  test('stock changes are append-only and paginated by product', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await repository.createProduct(const ProductDraft(
+      sku: 'STOCK-1',
+      name: 'Stock history item',
+      unitPriceCents: 1000,
+      unitCostCents: 400,
+      stockQuantity: 4,
+    ));
+    final product = (await repository.loadProducts()).single;
+
+    await repository.adjustStock(product.id, 2);
+    await repository.adjustStock(product.id, -1);
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Stock history customer',
+      date: DateTime.now(),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 2)],
+    ));
+
+    final firstPage = await repository.loadStockMovementPage(
+      productId: product.id,
+      pageSize: 2,
+    );
+    final secondPage = await repository.loadStockMovementPage(
+      productId: product.id,
+      pageIndex: 1,
+      pageSize: 2,
+    );
+    expect(firstPage.totalCount, 4);
+    expect(firstPage.pageCount, 2);
+    expect(firstPage.movements.map((movement) => movement.quantityDelta),
+        [-2, -1]);
+    expect(secondPage.movements.map((movement) => movement.quantityDelta),
+        [2, 4]);
+    expect(
+      firstPage.movements.map((movement) => movement.movementType),
+      ['sale', 'adjustment'],
+    );
+
+    final allMovements = [
+      ...firstPage.movements,
+      ...secondPage.movements,
+    ];
+    expect(
+      allMovements.fold<int>(0, (total, movement) => total + movement.quantityDelta),
+      3,
+    );
+    expect((await repository.loadProducts()).single.stockQuantity, 3);
+
+    await expectLater(
+      database.handle.update(
+        'stock_movements',
+        {'description': 'rewritten'},
+        where: 'id = ?',
+        whereArgs: [allMovements.first.id],
+      ),
+      throwsA(isA<Exception>()),
+    );
+    await expectLater(
+      database.handle.delete(
+        'stock_movements',
+        where: 'id = ?',
+        whereArgs: [allMovements.first.id],
+      ),
+      throwsA(isA<Exception>()),
+    );
+    expect(
+      (await database.handle.query('stock_movements')).length,
+      4,
+    );
+  });
 
   test('10,000 product catalog stays page-bounded during search', () async {
     final database = await LedgerDatabase.openInMemory();

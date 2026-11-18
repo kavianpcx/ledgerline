@@ -12,7 +12,7 @@ The tagged v0.5.1-beta.1 Windows prerelease provides a basic single-device ledge
 - Integer arithmetic for recorded amounts and balanced journal posting for supported entries, inventory opening, sales, and invoice payments. Current reports are limited.
 - A dashboard, chart of accounts, journal, basic product/inventory screen, sales invoices, and partial invoice receipt workflow.
 - English and Persian RTL, light and dark themes, persisted preferences, and a bounded searchable currency selector. Currency selection in this release is not full multi-currency accounting or an exchange-rate conversion.
-- Journal CSV import and offline English/Persian Tesseract OCR that extracts editable text. The later source on `main` adds reviewable product-catalog CSV mapping and transactional inventory posting; OCR does not yet classify documents or create records automatically.
+- Journal CSV import and offline English/Persian Tesseract OCR that extracts editable text. Product-catalog CSV mapping and transactional opening-inventory posting are now merged into `main`; OCR still extracts text only and does not classify documents or create records automatically.
 - SQLite backup export and integrity-checked restore, keeping a recovery copy of the prior database.
 - An integrated Windows caption area, keyboard shortcuts, per-user installer, and GitHub Actions build/test workflow.
 
@@ -24,11 +24,11 @@ Currency-safety PR [#3](https://github.com/kavianpcx/ledgerline/pull/3) is merge
 
 PR #4 added schema v4 and the indexed, editable, paginated product catalog. Its successful [PR workflow](https://github.com/kavianpcx/ledgerline/actions/runs/44336060124) passed analysis, all eight test files, Windows packaging and installer smoke checks, and scripted UI capture. Main now uses schema v4 with catalog search, sorting, pagination, product editing, history-preserving invoice snapshots, and inventory valuation adjustments. The Windows build for the merge commit runs separately on push to `main`.
 
-PR #5 added structured product CSV parsing, reviewable column mapping/preview, duplicate detection, and atomic product plus opening-inventory posting. These source changes pass CI but are not included in the older tagged Windows installer. The active `feature/pos-checkout` branch adds a database-paginated checkout screen with cart persistence, stale price/stock revalidation, and an atomic invoice plus optional full cash receipt. Its CI verification is pending.
+PR #5 added structured product CSV parsing, reviewable column mapping/preview, duplicate detection, and atomic product plus opening-inventory posting. These source changes pass CI but are not included in the older tagged Windows installer. The active `feature/pos-checkout` branch adds a database-paginated checkout screen with cart persistence, stale price/stock revalidation, and an atomic invoice plus optional full cash receipt. It now also records append-only, paginated stock history for opening stock, CSV imports, adjustments, and sales. Existing stock is represented as one labeled migration balance; prior movements cannot be reconstructed. The previous branch head passed all checks; GitHub Actions on PR #6 is the verification gate for new commits.
 
 ## Known limitations
 
-Ledgerline is not production-ready. The Android application, secure roles and authentication, multi-device synchronization, complete multi-currency accounting, restaurant table/kitchen workflows, full retail POS, warehouse movement accounting, XLSX/DOCX/PDF import, encrypted backups, payroll/tax rules, market data, and a complete updater remain unfinished. The product requirements stay active; see the audit for risks and implementation status.
+Ledgerline is not production-ready. The Android application, secure roles and authentication, multi-device synchronization, complete multi-currency accounting, restaurant table/kitchen workflows, full retail POS, multi-warehouse purchasing/transfers/returns, XLSX/DOCX/PDF import, encrypted backups, payroll/tax rules, market data, and a complete updater remain unfinished. The active POS branch is not part of a published release. The product requirements stay active; see the audit for risks and implementation status.
 
 ## Install the verified Windows release
 
