@@ -593,7 +593,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   Widget _page(LedgerSnapshot snapshot, double availableWidth) {
     final maxWidth = availableWidth >= 900 ? 1200.0 : 760.0;
     final content = switch (_selectedIndex) {
-      0 => _overview(snapshot),
+      0 => _overview(snapshot, availableWidth),
       1 => _entries(snapshot),
       2 => _accounts(snapshot),
       3 => _products(snapshot),
@@ -1093,8 +1093,8 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         ],
       );
 
-  Widget _overview(LedgerSnapshot snapshot) {
-    final width = MediaQuery.sizeOf(context).width;
+  Widget _overview(LedgerSnapshot snapshot, double availableWidth) {
+    final width = availableWidth;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
