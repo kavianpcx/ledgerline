@@ -105,17 +105,21 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   }
 
   bool _handleHardwareKey(KeyEvent event) {
-    if (!io.Platform.isWindows || event is! KeyDownEvent || event.repeat) return false;
+    if (!io.Platform.isWindows || event is! KeyDownEvent) return false;
     final keyboard = HardwareKeyboard.instance;
     if (!keyboard.isControlPressed || !keyboard.isShiftPressed) return false;
     final window = WindowManager.instance.getCurrent();
     if (window == null) return false;
     if (event.logicalKey == LogicalKeyboardKey.keyM) {
-      unawaited(window.minimize());
+      window.minimize();
       return true;
     }
     if (event.logicalKey == LogicalKeyboardKey.keyF) {
-      unawaited(window.isMaximized ? window.unmaximize() : window.maximize());
+      if (window.isMaximized) {
+        window.unmaximize();
+      } else {
+        window.maximize();
+      }
       return true;
     }
     return false;
