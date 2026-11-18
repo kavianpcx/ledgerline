@@ -149,8 +149,13 @@ class LedgerDatabase {
     Database db, {
     bool seedCurrentBalances = false,
   }) async {
+    final existingTables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'stock_movements'",
+    );
+    final tableAlreadyExisted = existingTables.isNotEmpty;
+
     await db.execute('''
-      CREATE TABLE stock_movements (
+      CREATE TABLE IF NOT EXISTS stock_movements (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         product_id TEXT NOT NULL,
         product_sku TEXT NOT NULL,
@@ -172,27 +177,27 @@ class LedgerDatabase {
       )
     ''');
     await db.execute(
-      'CREATE INDEX stock_movements_by_product ON stock_movements(product_id, recorded_at DESC, id DESC)',
+      'CREATE INDEX IF NOT EXISTS stock_movements_by_product ON stock_movements(product_id, recorded_at DESC, id DESC)',
     );
     await db.execute(
-      'CREATE INDEX stock_movements_by_reference ON stock_movements(reference_id)',
+      'CREATE INDEX IF NOT EXISTS stock_movements_by_reference ON stock_movements(reference_id)',
     );
     await db.execute('''
-      CREATE TRIGGER stock_movements_reject_update
+      CREATE TRIGGER IF NOT EXISTS stock_movements_reject_update
       BEFORE UPDATE ON stock_movements
       BEGIN
         SELECT RAISE(ABORT, 'stock movements are append-only');
       END
     ''');
     await db.execute('''
-      CREATE TRIGGER stock_movements_reject_delete
+      CREATE TRIGGER IF NOT EXISTS stock_movements_reject_delete
       BEFORE DELETE ON stock_movements
       BEGIN
         SELECT RAISE(ABORT, 'stock movements are append-only');
       END
     ''');
 
-    if (!seedCurrentBalances) return;
+    if (!seedCurrentBalances || tableAlreadyExisted) return;
     await db.execute('''
       INSERT INTO stock_movements (
         product_id, product_sku, product_name, movement_type,

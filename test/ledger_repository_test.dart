@@ -735,12 +735,13 @@ void main() {
       name: 'Stock history item',
       unitPriceCents: 1000,
       unitCostCents: 400,
-      stockQuantity: 4,
+      stockQuantity: 1,
     ));
     final product = (await repository.loadProducts()).single;
 
-    await repository.adjustStock(product.id, 2);
-    await repository.adjustStock(product.id, -1);
+    for (var index = 0; index < 9; index++) {
+      await repository.adjustStock(product.id, 1);
+    }
     await repository.createInvoice(InvoiceDraft(
       customerName: 'Stock history customer',
       date: DateTime.now(),
@@ -749,23 +750,25 @@ void main() {
 
     final firstPage = await repository.loadStockMovementPage(
       productId: product.id,
-      pageSize: 2,
+      pageSize: 10,
     );
     final secondPage = await repository.loadStockMovementPage(
       productId: product.id,
       pageIndex: 1,
-      pageSize: 2,
+      pageSize: 10,
     );
-    expect(firstPage.totalCount, 4);
+    expect(firstPage.totalCount, 11);
     expect(firstPage.pageCount, 2);
-    expect(firstPage.movements.map((movement) => movement.quantityDelta),
-        [-2, -1]);
-    expect(secondPage.movements.map((movement) => movement.quantityDelta),
-        [2, 4]);
+    expect(firstPage.movements, hasLength(10));
+    expect(firstPage.movements.first.quantityDelta, -2);
+    expect(firstPage.movements.first.movementType, 'sale');
     expect(
-      firstPage.movements.map((movement) => movement.movementType),
-      ['sale', 'adjustment'],
+      firstPage.movements.skip(1).every((movement) => movement.quantityDelta == 1),
+      isTrue,
     );
+    expect(secondPage.movements, hasLength(1));
+    expect(secondPage.movements.single.quantityDelta, 1);
+    expect(secondPage.movements.single.movementType, 'opening_balance');
 
     final allMovements = [
       ...firstPage.movements,
@@ -773,16 +776,16 @@ void main() {
     ];
     expect(
       allMovements.fold<int>(0, (total, movement) => total + movement.quantityDelta),
-      3,
+      8,
     );
-    expect((await repository.loadProducts()).single.stockQuantity, 3);
+    expect((await repository.loadProducts()).single.stockQuantity, 8);
 
     await expectLater(
       database.handle.update(
         'stock_movements',
         {'description': 'rewritten'},
         where: 'id = ?',
-        whereArgs: [allMovements.first.id],
+        whereArgs: [firstPage.movements.first.id],
       ),
       throwsA(isA<Exception>()),
     );
@@ -790,13 +793,13 @@ void main() {
       database.handle.delete(
         'stock_movements',
         where: 'id = ?',
-        whereArgs: [allMovements.first.id],
+        whereArgs: [firstPage.movements.first.id],
       ),
       throwsA(isA<Exception>()),
     );
     expect(
       (await database.handle.query('stock_movements')).length,
-      4,
+      11,
     );
   });
 
