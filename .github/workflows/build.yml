@@ -63,6 +63,9 @@ jobs:
           cache: true
       - name: Generate Windows runner
         run: flutter create --platforms=windows --project-name=ledgerline --org=com.ledgerline .
+      - name: Install Ledgerline Windows shortcuts
+        shell: pwsh
+        run: ./tool/patch_windows_shortcuts.ps1
       - name: Resolve dependencies
         run: flutter pub get
       - name: Install Tesseract runtime
