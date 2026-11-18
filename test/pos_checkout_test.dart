@@ -337,6 +337,51 @@ void main() {
     expect(invoice.balanceDueCents, 0);
   });
 
+  test('failed receipt posting rolls back the sale, stock, history, and journals', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await _addTestProduct(repository);
+
+    await database.handle.execute('''
+      CREATE TRIGGER reject_pos_payment
+      BEFORE INSERT ON invoice_payments
+      BEGIN
+        SELECT RAISE(ABORT, 'forced payment posting failure');
+      END
+    ''');
+
+    await expectLater(
+      repository.createInvoice(InvoiceDraft(
+        customerName: 'Walk-in customer',
+        date: DateTime(2026, 11, 18),
+        lines: [
+          InvoiceLineDraft(
+            productId: _coffee.id,
+            quantity: 2,
+            expectedUnitPriceCents: 1000,
+          ),
+        ],
+        paymentAmountCents: 2000,
+      )),
+      throwsA(anything),
+    );
+
+    final products = await repository.loadProducts();
+    expect(products.single.stockQuantity, 5);
+    expect(await database.handle.query('sales_invoices'), isEmpty);
+    expect(await database.handle.query('invoice_lines'), isEmpty);
+    expect(await database.handle.query('invoice_payments'), isEmpty);
+    expect(await database.handle.query('stock_movements'), hasLength(1));
+    expect(await database.handle.query('journal_entries'), hasLength(1));
+    expect(await database.handle.query('journal_lines'), hasLength(2));
+  });
+
   test('checkout rejects a changed price before posting or changing stock',
       () async {
     final repository = await _createRepository();
