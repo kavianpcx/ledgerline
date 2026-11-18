@@ -36,6 +36,7 @@ jobs:
           - test/accounting_engine_test.dart
           - test/ledger_repository_test.dart
           - test/widget_test.dart
+          - test/desktop_navigation_test.dart
           - test/update_service_test.dart
           - test/searchable_select_test.dart
           - test/settings_control_center_test.dart
