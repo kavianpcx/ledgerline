@@ -14,6 +14,10 @@
 - Add RFC 4180-style CSV parsing for product catalogs, automatic English/Persian column suggestions, editable mapping, row validation, and duplicate checks.
 - Import approved products and opening stock in one SQLite transaction with balanced inventory/equity journal entries; add parser, rollback, accounting, and 10,000-row coverage.
 
+- Add a database-paginated POS catalog and a cart that survives page navigation.
+- Revalidate cart prices and stock before checkout, and reject changed prices again inside the SQLite sale transaction.
+- Post invoice, stock reduction, sales/COGS journals, and an optional full cash receipt atomically; unpaid checkout remains in receivables.
+- Add POS widget and repository coverage for cash and on-account checkout, balanced accounting, inventory reduction, stale prices, and cart clearing.
 
 ## 0.5.1-beta.1
 

@@ -25,6 +25,7 @@ import '../services/offline_ocr_service.dart';
 import '../services/update_service.dart';
 import 'app_strings.dart';
 import 'widgets/searchable_select.dart';
+import 'pos_page.dart';
 
 class LedgerHomePage extends StatefulWidget {
   const LedgerHomePage({
@@ -64,6 +65,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   int _productPageSize = 25;
   String _productSortBy = 'name';
   bool _productSortAscending = true;
+  final Map<String, PosCartLine> _posCart = {};
 
   static const _destinations = <(String, IconData, IconData)>[
     ('overview', Icons.grid_view_rounded, Icons.grid_view_outlined),
@@ -74,6 +76,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     ('reports', Icons.analytics_rounded, Icons.analytics_outlined),
     ('smartImport', Icons.file_upload_outlined, Icons.file_upload_outlined),
     ('settings', Icons.settings_rounded, Icons.settings_outlined),
+    ('pointOfSale', Icons.shopping_cart_rounded, Icons.shopping_cart_outlined),
     ('more', Icons.more_horiz_rounded, Icons.more_horiz_outlined),
   ];
 
@@ -574,8 +577,8 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         final contentWidth = (constraints.maxWidth - navigationWidth).clamp(0.0, constraints.maxWidth).toDouble();
         final navIndex = switch (_selectedIndex) {
           0 => 0,
-          1 => 1,
-          4 => 2,
+          8 => 1,
+          3 => 2,
           _ => 3,
         };
         final scaffold = Scaffold(
@@ -733,10 +736,10 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                   key: const Key('ledgerline-bottom-navigation'),
                   selectedIndex: navIndex,
                   onDestinationSelected: (index) => setState(() {
-                    _selectedIndex = switch (index) { 0 => 0, 1 => 1, 2 => 4, _ => 8 };
+                    _selectedIndex = switch (index) { 0 => 0, 1 => 8, 2 => 3, _ => 9 };
                   }),
                   destinations: [
-                    for (final index in [0, 1, 4, 8])
+                    for (final index in [0, 8, 3, 9])
                       NavigationDestination(
                         icon: Icon(_destinations[index].$3),
                         selectedIcon: Icon(_destinations[index].$2),
@@ -763,6 +766,18 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
       5 => _reports(snapshot),
       6 => _smartImport(snapshot),
       7 => _settingsPage(snapshot),
+      8 => PointOfSalePage(
+          repository: widget.repository,
+          currencyCode: widget.settings.currencyCode,
+          beforeCheckout: _requireAccountingCurrency,
+          initialCart: _posCart,
+          onCartChanged: (cart) {
+            _posCart
+              ..clear()
+              ..addAll(cart);
+          },
+          onCheckoutCompleted: _reload,
+        ),
       _ => _more(snapshot),
     };
     return ListView(
@@ -1064,10 +1079,21 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
           const SizedBox(height: 16),
           Align(
             alignment: AlignmentDirectional.centerEnd,
-            child: FilledButton.icon(
-              onPressed: () => _addInvoice(snapshot),
-              icon: const Icon(Icons.add_rounded),
-              label: Text(tr(context, 'newInvoice')),
+            child: Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: () => setState(() => _selectedIndex = 8),
+                  icon: const Icon(Icons.shopping_cart_outlined),
+                  label: Text(tr(context, 'pointOfSale')),
+                ),
+                FilledButton.icon(
+                  onPressed: () => _addInvoice(snapshot),
+                  icon: const Icon(Icons.add_rounded),
+                  label: Text(tr(context, 'newInvoice')),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 12),
@@ -1371,6 +1397,11 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                   onPressed: () => setState(() => _selectedIndex = 4),
                   icon: const Icon(Icons.receipt_long_outlined),
                   label: Text(tr(context, 'openInvoices')),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: () => setState(() => _selectedIndex = 8),
+                  icon: const Icon(Icons.shopping_cart_outlined),
+                  label: Text(tr(context, 'pointOfSale')),
                 ),
                 OutlinedButton.icon(
                   onPressed: () => _addInvoice(snapshot),

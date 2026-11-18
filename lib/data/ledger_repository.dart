@@ -299,6 +299,27 @@ class LedgerRepository {
     return rows.map(Product.fromRow).toList(growable: false);
   }
 
+  /// Reloads selected catalog records without materializing the full catalog.
+  /// Used at checkout to ensure a cart does not silently use stale prices.
+  Future<List<Product>> loadProductsByIds(List<String> productIds) async {
+    if (productIds.isEmpty) return const [];
+    final products = <Product>[];
+    const chunkSize = 400;
+    for (var start = 0; start < productIds.length; start += chunkSize) {
+      final end = start + chunkSize < productIds.length
+          ? start + chunkSize
+          : productIds.length;
+      final ids = productIds.sublist(start, end).toSet().toList(growable: false);
+      final rows = await _database.handle.query(
+        'products',
+        where: 'id IN (' + List.filled(ids.length, '?').join(',') + ')',
+        whereArgs: ids,
+      );
+      products.addAll(rows.map(Product.fromRow));
+    }
+    return products;
+  }
+
   Future<ProductPage> loadProductPage({
     String query = '',
     int pageIndex = 0,
@@ -524,35 +545,76 @@ class LedgerRepository {
   }
 
   Future<void> createInvoice(InvoiceDraft draft) async {
-    if (draft.customerName.trim().isEmpty || draft.lines.isEmpty || draft.taxCents < 0) {
-      throw ArgumentError('Customer, at least one line, and a non-negative tax amount are required.');
+    if (draft.customerName.trim().isEmpty ||
+        draft.lines.isEmpty ||
+        draft.taxCents < 0 ||
+        draft.paymentAmountCents < 0) {
+      throw ArgumentError(
+        'Customer, invoice lines, tax, and payment amounts must be valid.',
+      );
     }
 
     await _database.handle.transaction((txn) async {
       await _requireAccountingCurrency(txn);
+      const maxSignedInt = 0x7fffffffffffffff;
       final lines = <({Product product, int quantity, int lineTotal})>[];
       var subtotal = 0;
       var costTotal = 0;
       for (final line in draft.lines) {
-        if (line.quantity <= 0) throw ArgumentError('Invoice quantities must be positive.');
-        final rows = await txn.query('products', where: 'id = ?', whereArgs: [line.productId]);
-        if (rows.isEmpty) throw ArgumentError('An invoice product no longer exists.');
+        if (line.quantity <= 0) {
+          throw ArgumentError('Invoice quantities must be positive.');
+        }
+        final rows = await txn.query(
+          'products',
+          where: 'id = ?',
+          whereArgs: [line.productId],
+        );
+        if (rows.isEmpty) {
+          throw ArgumentError('An invoice product no longer exists.');
+        }
         final product = Product.fromRow(rows.first);
         if (product.stockQuantity < line.quantity) {
-          throw ArgumentError('Not enough stock for ${product.name}.');
+          throw ArgumentError('Not enough stock for ' + product.name + '.');
+        }
+        if (line.expectedUnitPriceCents != null &&
+            line.expectedUnitPriceCents != product.unitPriceCents) {
+          throw StateError(
+            'The price changed for ' + product.name + '. Review the cart before checkout.',
+          );
+        }
+        if (product.unitPriceCents > maxSignedInt ~/ line.quantity ||
+            product.unitCostCents > maxSignedInt ~/ line.quantity) {
+          throw ArgumentError('Invoice line value exceeds the supported integer range.');
         }
         final lineTotal = product.unitPriceCents * line.quantity;
+        final lineCost = product.unitCostCents * line.quantity;
+        if (subtotal > maxSignedInt - lineTotal ||
+            costTotal > maxSignedInt - lineCost) {
+          throw ArgumentError('Invoice total exceeds the supported integer range.');
+        }
         subtotal += lineTotal;
-        costTotal += product.unitCostCents * line.quantity;
+        costTotal += lineCost;
         lines.add((product: product, quantity: line.quantity, lineTotal: lineTotal));
       }
-      if (subtotal <= 0) throw ArgumentError('Invoice total must be greater than zero.');
-
-      final countRows = await txn.rawQuery('SELECT COUNT(*) AS invoice_count FROM sales_invoices');
-      final nextNumber = (countRows.first['invoice_count']! as int) + 1;
-      final invoiceNumber = 'INV-${draft.date.year}-${nextNumber.toString().padLeft(6, '0')}';
-      final invoiceId = 'invoice_${DateTime.now().microsecondsSinceEpoch}';
+      if (subtotal <= 0) {
+        throw ArgumentError('Invoice total must be greater than zero.');
+      }
+      if (draft.taxCents > maxSignedInt - subtotal) {
+        throw ArgumentError('Invoice total exceeds the supported integer range.');
+      }
       final total = subtotal + draft.taxCents;
+      if (draft.paymentAmountCents > total) {
+        throw ArgumentError('Payment cannot exceed the invoice total.');
+      }
+
+      final countRows = await txn.rawQuery(
+        'SELECT COUNT(*) AS invoice_count FROM sales_invoices',
+      );
+      final nextNumber = (countRows.first['invoice_count']! as int) + 1;
+      final invoiceNumber =
+          'INV-' + draft.date.year.toString() + '-' + nextNumber.toString().padLeft(6, '0');
+      final invoiceId =
+          'invoice_' + DateTime.now().microsecondsSinceEpoch.toString();
       final createdAt = DateTime.now().toUtc().toIso8601String();
 
       await txn.insert('sales_invoices', {
@@ -560,7 +622,7 @@ class LedgerRepository {
         'invoice_number': invoiceNumber,
         'customer_name': draft.customerName.trim(),
         'issue_date': _dateOnly(draft.date),
-        'status': 'issued',
+        'status': draft.paymentAmountCents == total ? 'paid' : 'issued',
         'subtotal_cents': subtotal,
         'tax_cents': draft.taxCents,
         'total_cents': total,
@@ -624,6 +686,25 @@ class LedgerRepository {
           'debit_cents': 0,
           'credit_cents': costTotal,
         });
+      }
+
+      if (draft.paymentAmountCents > 0) {
+        await txn.insert('invoice_payments', {
+          'id': 'pos_payment_' + invoiceId,
+          'invoice_id': invoiceId,
+          'payment_date': _dateOnly(draft.date),
+          'amount_cents': draft.paymentAmountCents,
+          'created_at': createdAt,
+        });
+        await _insertTwoLineJournalEntry(
+          txn,
+          entryId: 'pos_payment_' + invoiceId,
+          date: draft.date,
+          description: 'Invoice payment · ' + invoiceNumber + ' · ' + draft.customerName.trim(),
+          debitAccountId: 'cash',
+          creditAccountId: 'receivables',
+          amountCents: draft.paymentAmountCents,
+        );
       }
     });
   }

@@ -37,6 +37,7 @@ jobs:
           - test/money_test.dart
           - test/ledger_repository_test.dart
           - test/product_import_test.dart
+          - test/pos_checkout_test.dart
           - test/widget_test.dart
           - test/desktop_navigation_test.dart
           - test/update_service_test.dart

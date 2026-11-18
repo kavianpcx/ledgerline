@@ -32,9 +32,9 @@ class _LedgerDesktopSidebarState extends State<LedgerDesktopSidebar> {
   static const _sections = <({String labelKey, List<int> indices})>[
     (labelKey: 'navWorkspace', indices: [0]),
     (labelKey: 'navAccounting', indices: [1, 2, 5]),
-    (labelKey: 'navSales', indices: [4]),
+    (labelKey: 'navSales', indices: [4, 8]),
     (labelKey: 'navInventory', indices: [3]),
-    (labelKey: 'navTools', indices: [6, 8]),
+    (labelKey: 'navTools', indices: [6, 9]),
     (labelKey: 'navAdministration', indices: [7]),
   ];
 

@@ -2,7 +2,7 @@
 
 ## Scope and evidence
 
-This review treats the latest GitHub source as authoritative. At the start of the product-catalog follow-on, `main` was `2f444d3e2e81aa927a42bba4fd272bc1900bbeb7`. Sidebar repair PR [#2](https://github.com/kavianpcx/ledgerline/pull/2), currency-safety PR [#3](https://github.com/kavianpcx/ledgerline/pull/3), and product-catalog PR [#4](https://github.com/kavianpcx/ledgerline/pull/4) are now merged. Current `main` is `bf9d2ed1c821e648360521a69700073bd360f15a`. Its successful Windows workflow is [run 44306432838](https://github.com/kavianpcx/ledgerline/actions/runs/44306432838); the currency-safety Windows build and test workflow is [run 44326912497](https://github.com/kavianpcx/ledgerline/actions/runs/44326912497). It passed analysis, all eight test files, Windows packaging/smoke, and scripted evidence capture; its release-publish job was skipped because it was a PR run.
+This review treats the latest GitHub source as authoritative. At the start of POS checkout work, `main` was `ab615a02f369155fbd5ad44ab170f0a3c7c4005a` after merges of PRs #2 through #5. Sidebar repair PR #2, currency-safety PR #3, product-catalog PR #4, and product CSV import PR #5 are merged. The successful post-PR5 Windows build and test workflow is [run 44371927172](https://github.com/kavianpcx/ledgerline/actions/runs/44371927172). It passed analysis, all eight test files, Windows packaging/smoke, and scripted evidence capture; its release-publish job was skipped because it was a PR run.
 
 CI ran the installed Windows application at wide, medium, and narrow window sizes and captured title-bar and settings scenarios. The UI-evidence artifact exists, but its pixels have not been manually reviewed in this workspace. Therefore CI execution is verified, while visual acceptance remains incomplete. The local workspace is a stale, uncommitted snapshot with no repository commits, and this environment has no Flutter or Dart command; it is not used as a source of truth. GitHub Actions is the available build/test path.
 
@@ -26,8 +26,8 @@ The active product target is Windows 10/11 and Android phones/tablets. The produ
 
 ## Incomplete product functionality
 
-- The merged product catalog supports description, category, barcode, editing, and database-backed search/sorting/pagination. Product images/icon selection, variants, suppliers, QR identifiers, multiple warehouses, serial/batch tracking, stock movement history, and purchasing workflows remain unfinished. Branch `feature/csv-product-import` adds a product CSV preview and atomic import, pending CI review.
-- Sales are invoice-based, not a complete retail POS or restaurant order system. Table plans, kitchen tickets, modifiers, split bills, refunds/returns, payment terminal integrations, receipt printing, and checkout shortcuts are unfinished.
+- The merged product catalog supports description, category, barcode, editing, and database-backed search/sorting/pagination. Product images/icon selection, variants, suppliers, QR identifiers, multiple warehouses, serial/batch tracking, stock movement history, and purchasing workflows remain unfinished. Product CSV preview and atomic import are merged via PR #5. Branch `feature/pos-checkout` currently adds the basic POS checkout described below; its branch CI is pending.
+- The POS work in `feature/pos-checkout` adds database-backed search/pagination, a persisted-across-navigation cart, stale price and stock checks, atomic sale posting, and optional full cash settlement. It does not yet include partial/multiple payments, tax/discount controls, returns/refunds, receipt printing, barcode scanning, keyboard checkout, restaurant tables/kitchen, or payment terminal support. This branch is not in a published release while CI is pending.
 - Smart Import supports CSV and OCR text extraction only. It does not parse XLSX/XLS, DOCX/PDF tables, map fields with confidence, deduplicate records, or create products or accounting drafts from documents.
 - Settings remain a partial control center. User roles, manager mode, shifts, warehouse configuration, synchronization, printing, devices, notifications, payroll/tax, live market data, encrypted backup, and secure recovery are absent or incomplete.
 - The updater can discover/download a GitHub release and check an asset digest, but it lacks a separate branded updater, truthful progress/cancel UI, trusted publisher signature verification, safe install handoff/rollback, and an end-to-end older-to-newer update test.
@@ -51,7 +51,7 @@ The active product target is Windows 10/11 and Android phones/tablets. The produ
 
 ## Database migrations
 
-- Current `main` uses schema version 4. The v3-to-v4 migration adds product description, category, barcode, update timestamps, and indexes; CI covers existing-column compatibility and migration preservation. Product CSV import adds no schema migration and records opening inventory through balanced journal entries.
+- Current `main` uses schema version 4. The v3-to-v4 migration adds product description, category, barcode, update timestamps, and indexes; CI covers existing-column compatibility and migration preservation. Product CSV import adds no schema migration and records opening inventory through balanced journal entries. POS checkout adds no schema change; it uses the existing invoice/payment records.
 - Future variants, stock movement history, roles, multiple-currency postings, shifts, and sync metadata need separately versioned migrations and upgrade tests. Never reset or delete accounting history during migration.
 - Future encrypted backups need a versioned envelope, authenticated integrity checks, and tested recovery. Never reset or delete accounting history during migration.
 
@@ -64,8 +64,8 @@ The active product target is Windows 10/11 and Android phones/tablets. The produ
 ## Required implementation order
 
 1. Complete and visually review the Windows navigation/title-bar repair, including real high-DPI and Snap checks where hardware permits.
-2. Currency integrity and editable/paginated product catalog are merged and passing PR CI. Complete and verify transactional product CSV import; then add image/icon selection and structured XLSX/DOCX/PDF Smart Import with reviewed destination previews.
-3. Integrate POS, restaurant orders, inventory movement accounting, purchasing, and receipts with balanced journal records.
+2. Currency integrity, paginated product catalog, and transactional product CSV import are merged and passing CI; add product imagery and structured XLSX/DOCX/PDF Smart Import with reviewed destination previews.
+3. Verify and merge basic POS checkout after its branch workflow passes, then add partial payments, tax/discount handling, receipts, returns, inventory movement accounting, purchasing, and restaurant orders.
 4. Add owner/manager/employee authorization, protected management mode, and idempotent shifts/daily close.
 5. Build Android platform-appropriate workflows, scanning, and secure synchronization with conflict and duplicate-posting tests.
 6. Finish reports, security, encrypted backups/recovery, updates, printers/terminals, market data, and production installation once their real workflows are verified.

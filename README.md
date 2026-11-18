@@ -6,13 +6,13 @@ The complete product requirements are in [docs/PRODUCT_SPECIFICATION.md](docs/PR
 
 ## Verified Windows prerelease
 
-The current v0.5.1-beta.1 release provides a basic single-device Windows ledger with:
+The tagged v0.5.1-beta.1 Windows prerelease provides a basic single-device ledger with the following features. It predates the current `main` branch's product CSV importer and is not a POS release:
 
 - Local SQLite storage for accounts, journal entries and lines, products, invoices, invoice lines, invoice payments, and application settings.
 - Integer arithmetic for recorded amounts and balanced journal posting for supported entries, inventory opening, sales, and invoice payments. Current reports are limited.
 - A dashboard, chart of accounts, journal, basic product/inventory screen, sales invoices, and partial invoice receipt workflow.
 - English and Persian RTL, light and dark themes, persisted preferences, and a bounded searchable currency selector. Currency selection in this release is not full multi-currency accounting or an exchange-rate conversion.
-- Journal CSV import and offline English/Persian Tesseract OCR that extracts editable text. The current source branch adds a separate product-catalog CSV preview with detected column mapping and transactional inventory posting; OCR does not yet classify documents or create records automatically.
+- Journal CSV import and offline English/Persian Tesseract OCR that extracts editable text. The later source on `main` adds reviewable product-catalog CSV mapping and transactional inventory posting; OCR does not yet classify documents or create records automatically.
 - SQLite backup export and integrity-checked restore, keeping a recovery copy of the prior database.
 - An integrated Windows caption area, keyboard shortcuts, per-user installer, and GitHub Actions build/test workflow.
 
@@ -20,11 +20,11 @@ PR [#2](https://github.com/kavianpcx/ledgerline/pull/2) restored permanent left-
 
 ## Current source and development work
 
-Currency-safety PR [#3](https://github.com/kavianpcx/ledgerline/pull/3) is merged into `main` at `2f444d3e2e81aa927a42bba4fd272bc1900bbeb7`. The successful [CI run](https://github.com/kavianpcx/ledgerline/actions/runs/44326912497) passed analysis, all eight test files, Windows packaging and installer smoke checks, and captured eight Windows UI scenarios. Its workflow artifact includes the installer and screenshots. The screenshots have not been manually pixel-reviewed in this workspace. The source changes require a confirmed base currency before monetary writes, handle minor units with integer arithmetic, confirm the interpretation of legacy amounts, and lock the base currency once records exist. These source changes are not included in the published v0.5.1-beta.1 installer. There is still no mixed-currency accounting or exchange-rate conversion.
+Currency-safety PR [#3](https://github.com/kavianpcx/ledgerline/pull/3) is merged into `main`. Product-catalog PR [#4](https://github.com/kavianpcx/ledgerline/pull/4) and CSV import PR [#5](https://github.com/kavianpcx/ledgerline/pull/5) are also merged. Current `main` is `ab615a02f369155fbd5ad44ab170f0a3c7c4005a`; its successful post-merge build and test workflow is [run 44371927172](https://github.com/kavianpcx/ledgerline/actions/runs/44371927172). The successful [CI run](https://github.com/kavianpcx/ledgerline/actions/runs/44326912497) passed analysis, all eight test files, Windows packaging and installer smoke checks, and captured eight Windows UI scenarios. Its workflow artifact includes the installer and screenshots. The screenshots have not been manually pixel-reviewed in this workspace. The source changes require a confirmed base currency before monetary writes, handle minor units with integer arithmetic, confirm the interpretation of legacy amounts, and lock the base currency once records exist. These source changes are not included in the published v0.5.1-beta.1 installer. There is still no mixed-currency accounting or exchange-rate conversion.
 
-Product-catalog PR [#4](https://github.com/kavianpcx/ledgerline/pull/4) is merged into `main` at `bf9d2ed1c821e648360521a69700073bd360f15a`. Its successful [PR workflow](https://github.com/kavianpcx/ledgerline/actions/runs/44336060124) passed analysis, all eight test files, Windows packaging and installer smoke checks, and scripted UI capture. Main now uses schema v4 with catalog search, sorting, pagination, product editing, history-preserving invoice snapshots, and inventory valuation adjustments. The Windows build for the merge commit runs separately on push to `main`.
+PR #4 added schema v4 and the indexed, editable, paginated product catalog. Its successful [PR workflow](https://github.com/kavianpcx/ledgerline/actions/runs/44336060124) passed analysis, all eight test files, Windows packaging and installer smoke checks, and scripted UI capture. Main now uses schema v4 with catalog search, sorting, pagination, product editing, history-preserving invoice snapshots, and inventory valuation adjustments. The Windows build for the merge commit runs separately on push to `main`.
 
-The next source branch, `feature/csv-product-import`, adds structured product CSV parsing, a reviewable column mapping/preview, duplicate detection, and atomic product plus opening-inventory posting. This implementation is not part of the published Windows release and remains subject to CI.
+PR #5 added structured product CSV parsing, reviewable column mapping/preview, duplicate detection, and atomic product plus opening-inventory posting. These source changes pass CI but are not included in the older tagged Windows installer. The active `feature/pos-checkout` branch adds a database-paginated checkout screen with cart persistence, stale price/stock revalidation, and an atomic invoice plus optional full cash receipt. Its CI verification is pending.
 
 ## Known limitations
 
