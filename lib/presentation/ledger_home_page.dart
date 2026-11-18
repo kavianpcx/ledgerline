@@ -649,7 +649,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                                   _selectedIndex = 7;
                                   _settingsSectionIndex = 4;
                                 }),
-                                child: Text(tr(context, 'currency')),
+                                child: Text(tr(context, 'configureCurrency')),
                               ),
                             ],
                           ),
@@ -848,7 +848,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
       ('settingsBusiness', Icons.business_rounded),
       ('appearance', Icons.palette_outlined),
       ('languageRegion', Icons.translate_rounded),
-      ('currency', Icons.currency_exchange_rounded),
+      ('currencySettings', Icons.currency_exchange_rounded),
       ('accountingSettings', Icons.account_balance_rounded),
       ('salesSettings', Icons.point_of_sale_rounded),
       ('inventorySettings', Icons.inventory_2_outlined),
@@ -990,7 +990,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         );
       case 4:
         return _settingsCard(
-          title: tr(context, 'currency'),
+          title: tr(context, 'currencySettings'),
           subtitle: tr(context, 'currencyHint'),
           children: [
             Text(
