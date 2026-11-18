@@ -7,6 +7,16 @@ import 'package:ledgerline/domain/product.dart';
 import 'package:ledgerline/domain/sales_invoice.dart';
 import 'package:ledgerline/presentation/pos_page.dart';
 
+const _coffee = Product(
+  id: 'product_coffee',
+  sku: 'COF-01',
+  name: 'Coffee tin',
+  unitPriceCents: 1000,
+  unitCostCents: 400,
+  stockQuantity: 5,
+  category: 'Coffee',
+);
+
 Future<void> _pumpUntil(WidgetTester tester, bool Function() condition) async {
   for (var attempt = 0; attempt < 100 && !condition(); attempt++) {
     await tester.pump(const Duration(milliseconds: 100));
@@ -14,71 +24,75 @@ Future<void> _pumpUntil(WidgetTester tester, bool Function() condition) async {
   expect(condition(), isTrue, reason: 'The POS checkout did not reach the expected state.');
 }
 
-void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
+Future<LedgerRepository> _createRepository() async {
+  final database = await LedgerDatabase.openInMemory();
+  final repository = LedgerRepository(database);
+  await repository.initialize();
+  await repository.configureAccountingCurrency(
+    currencyCode: 'USD',
+    confirmExistingAmounts: true,
+  );
+  return repository;
+}
 
-  Future<LedgerRepository> createRepository() async {
-    final database = await LedgerDatabase.openInMemory();
-    final repository = LedgerRepository(database);
-    await repository.initialize();
-    await repository.configureAccountingCurrency(
-      currencyCode: 'USD',
-      confirmExistingAmounts: true,
-    );
-    return repository;
-  }
+Future<void> _addTestProduct(LedgerRepository repository) =>
+    repository.createProduct(const ProductDraft(
+      sku: 'COF-01',
+      name: 'Coffee tin',
+      unitPriceCents: 1000,
+      unitCostCents: 400,
+      stockQuantity: 5,
+      category: 'Coffee',
+    ));
 
-  Future<void> addTestProduct(LedgerRepository repository) =>
-      repository.createProduct(const ProductDraft(
-        sku: 'COF-01',
-        name: 'Coffee tin',
-        unitPriceCents: 1000,
-        unitCostCents: 400,
-        stockQuantity: 5,
-        category: 'Coffee',
-      ));
+Future<_FakePosRepository> _createWidgetRepository(WidgetTester tester) async {
+  final database = (await tester.runAsync(LedgerDatabase.openInMemory))!;
+  return _FakePosRepository(database);
+}
 
-  Future<void> mountPos(
-    WidgetTester tester,
-    LedgerRepository repository,
-    Map<String, PosCartLine> cart, {
-    required bool Function() beforeCheckout,
-    required Future<void> Function() onCompleted,
-    required ValueChanged<Map<String, PosCartLine>> onCartChanged,
-  }) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: PointOfSalePage(
-              repository: repository,
-              currencyCode: 'USD',
-              beforeCheckout: beforeCheckout,
-              onCheckoutCompleted: onCompleted,
-              initialCart: cart,
-              onCartChanged: onCartChanged,
-            ),
+Future<void> _mountPos(
+  WidgetTester tester,
+  LedgerRepository repository,
+  Map<String, PosCartLine> cart, {
+  required Future<void> Function() onCompleted,
+  required ValueChanged<Map<String, PosCartLine>> onCartChanged,
+}) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: PointOfSalePage(
+            repository: repository,
+            currencyCode: 'USD',
+            beforeCheckout: () => true,
+            onCheckoutCompleted: onCompleted,
+            initialCart: cart,
+            onCartChanged: onCartChanged,
           ),
         ),
       ),
-    );
-    await tester.pumpAndSettle();
-  }
+    ),
+  );
+  await tester.pumpAndSettle();
+}
 
-  testWidgets('cash checkout posts sale, payment, stock, and ledger together',
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('cash checkout submits the selected cart and full payment',
       (tester) async {
-    final repository = await createRepository();
-    addTearDown(repository.close);
-    await addTestProduct(repository);
+    final repository = await _createWidgetRepository(tester);
+    addTearDown(() async {
+      await tester.runAsync(repository.close);
+    });
 
     var refreshCount = 0;
     final savedCart = <String, PosCartLine>{};
-    await mountPos(
+    await _mountPos(
       tester,
       repository,
       savedCart,
-      beforeCheckout: () => true,
       onCompleted: () async {
         refreshCount++;
       },
@@ -95,7 +109,6 @@ void main() {
     await tester.tap(productTile);
     await tester.pumpAndSettle();
     expect(savedCart.values.single.quantity, 2);
-    expect(savedCart.values.single.product.unitPriceCents, 1000);
 
     await tester.ensureVisible(find.byKey(const Key('pos-checkout')));
     await tester.tap(find.byKey(const Key('pos-checkout')));
@@ -106,34 +119,28 @@ void main() {
     await tester.tap(find.byKey(const Key('pos-submit-checkout')));
     await _pumpUntil(tester, () => refreshCount == 1);
 
-    final snapshot = await repository.loadSnapshot();
-    expect(refreshCount, 1);
+    expect(repository.invoiceDrafts, hasLength(1));
+    final draft = repository.invoiceDrafts.single;
+    expect(draft.customerName, 'Walk-in customer');
+    expect(draft.paymentAmountCents, 2000);
+    expect(draft.lines.single.quantity, 2);
+    expect(draft.lines.single.productId, _coffee.id);
+    expect(draft.lines.single.expectedUnitPriceCents, 1000);
     expect(savedCart, isEmpty);
-    expect(snapshot.invoices, hasLength(1));
-    expect(snapshot.invoices.single.status, 'paid');
-    expect(snapshot.invoices.single.paidCents, 2000);
-    expect(snapshot.products.single.stockQuantity, 3);
-    expect(snapshot.assetsCents, 3200);
-    expect(snapshot.netIncomeCents, 1200);
-    expect(
-      snapshot.assetsCents,
-      snapshot.liabilitiesCents + snapshot.equityCents + snapshot.netIncomeCents,
-    );
-    expect(snapshot.entries, hasLength(3));
   });
 
-  testWidgets('sale can be issued without payment and settled later',
+  testWidgets('unpaid checkout creates an on-account invoice draft',
       (tester) async {
-    final repository = await createRepository();
-    addTearDown(repository.close);
-    await addTestProduct(repository);
+    final repository = await _createWidgetRepository(tester);
+    addTearDown(() async {
+      await tester.runAsync(repository.close);
+    });
 
     var refreshCount = 0;
-    await mountPos(
+    await _mountPos(
       tester,
       repository,
       const {},
-      beforeCheckout: () => true,
       onCompleted: () async {
         refreshCount++;
       },
@@ -153,34 +160,23 @@ void main() {
     await tester.tap(find.byKey(const Key('pos-submit-checkout')));
     await _pumpUntil(tester, () => refreshCount == 1);
 
-    var invoice = (await repository.loadSnapshot()).invoices.single;
-    expect(invoice.status, 'issued');
-    expect(invoice.paidCents, 0);
-    expect(invoice.balanceDueCents, 1000);
-
-    await repository.recordInvoicePayment(InvoicePaymentDraft(
-      invoiceId: invoice.id,
-      amountCents: invoice.balanceDueCents,
-      date: DateTime(2026, 11, 18),
-    ));
-    invoice = (await repository.loadSnapshot()).invoices.single;
-    expect(invoice.status, 'paid');
-    expect(invoice.paidCents, 1000);
-    expect(invoice.balanceDueCents, 0);
+    expect(repository.invoiceDrafts, hasLength(1));
+    expect(repository.invoiceDrafts.single.paymentAmountCents, 0);
+    expect(repository.invoiceDrafts.single.lines.single.quantity, 1);
   });
 
   testWidgets('clearing the cart updates the app shell cart snapshot',
       (tester) async {
-    final repository = await createRepository();
-    addTearDown(repository.close);
-    await addTestProduct(repository);
+    final repository = await _createWidgetRepository(tester);
+    addTearDown(() async {
+      await tester.runAsync(repository.close);
+    });
 
     final savedCart = <String, PosCartLine>{};
-    await mountPos(
+    await _mountPos(
       tester,
       repository,
       savedCart,
-      beforeCheckout: () => true,
       onCompleted: () async {},
       onCartChanged: (cart) {
         savedCart
@@ -200,11 +196,73 @@ void main() {
     expect(savedCart, isEmpty);
   });
 
+  test('cash checkout posts invoice, payment, stock, and balanced journals',
+      () async {
+    final repository = await _createRepository();
+    addTearDown(repository.close);
+    await _addTestProduct(repository);
+    final product = (await repository.loadProducts()).single;
+
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Walk-in customer',
+      date: DateTime(2026, 11, 18),
+      lines: [
+        InvoiceLineDraft(
+          productId: product.id,
+          quantity: 2,
+          expectedUnitPriceCents: 1000,
+        ),
+      ],
+      paymentAmountCents: 2000,
+    ));
+
+    final snapshot = await repository.loadSnapshot();
+    expect(snapshot.invoices, hasLength(1));
+    expect(snapshot.invoices.single.status, 'paid');
+    expect(snapshot.invoices.single.paidCents, 2000);
+    expect(snapshot.products.single.stockQuantity, 3);
+    expect(snapshot.assetsCents, 3200);
+    expect(snapshot.netIncomeCents, 1200);
+    expect(
+      snapshot.assetsCents,
+      snapshot.liabilitiesCents + snapshot.equityCents + snapshot.netIncomeCents,
+    );
+    expect(snapshot.entries, hasLength(3));
+  });
+
+  test('on-account invoice can be settled separately', () async {
+    final repository = await _createRepository();
+    addTearDown(repository.close);
+    await _addTestProduct(repository);
+    final product = (await repository.loadProducts()).single;
+
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Walk-in customer',
+      date: DateTime(2026, 11, 18),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+    ));
+
+    var invoice = (await repository.loadSnapshot()).invoices.single;
+    expect(invoice.status, 'issued');
+    expect(invoice.paidCents, 0);
+    expect(invoice.balanceDueCents, 1000);
+
+    await repository.recordInvoicePayment(InvoicePaymentDraft(
+      invoiceId: invoice.id,
+      amountCents: invoice.balanceDueCents,
+      date: DateTime(2026, 11, 18),
+    ));
+    invoice = (await repository.loadSnapshot()).invoices.single;
+    expect(invoice.status, 'paid');
+    expect(invoice.paidCents, 1000);
+    expect(invoice.balanceDueCents, 0);
+  });
+
   test('checkout rejects a changed price before posting or changing stock',
       () async {
-    final repository = await createRepository();
+    final repository = await _createRepository();
     addTearDown(repository.close);
-    await addTestProduct(repository);
+    await _addTestProduct(repository);
     final product = (await repository.loadProducts()).single;
 
     await repository.updateProduct(
@@ -238,4 +296,54 @@ void main() {
     expect((await repository.loadSnapshot()).invoices, isEmpty);
     expect((await repository.loadProducts()).single.stockQuantity, 5);
   });
+}
+
+class _FakePosRepository extends LedgerRepository {
+  _FakePosRepository(super.database);
+
+  final List<Product> _products = [_coffee];
+  final List<InvoiceDraft> invoiceDrafts = [];
+
+  @override
+  Future<ProductPage> loadProductPage({
+    String query = '',
+    int pageIndex = 0,
+    int pageSize = 25,
+    String sortBy = 'name',
+    bool ascending = true,
+  }) async {
+    final normalizedQuery = query.trim().toLowerCase();
+    final products = _products.where((product) {
+      if (normalizedQuery.isEmpty) return true;
+      return product.name.toLowerCase().contains(normalizedQuery) ||
+          product.sku.toLowerCase().contains(normalizedQuery) ||
+          product.barcode.toLowerCase().contains(normalizedQuery) ||
+          product.category.toLowerCase().contains(normalizedQuery);
+    }).toList();
+    products.sort((left, right) {
+      final comparison = sortBy == 'price'
+          ? left.unitPriceCents.compareTo(right.unitPriceCents)
+          : left.name.toLowerCase().compareTo(right.name.toLowerCase());
+      return ascending ? comparison : -comparison;
+    });
+    final pageCount = products.isEmpty ? 1 : (products.length + pageSize - 1) ~/ pageSize;
+    final safePageIndex = pageIndex >= pageCount ? pageCount - 1 : pageIndex;
+    final start = safePageIndex * pageSize;
+    final end = start + pageSize < products.length ? start + pageSize : products.length;
+    return ProductPage(
+      products: products.sublist(start, end),
+      totalCount: products.length,
+      pageIndex: safePageIndex,
+      pageSize: pageSize,
+    );
+  }
+
+  @override
+  Future<List<Product>> loadProductsByIds(List<String> productIds) async =>
+      _products.where((product) => productIds.contains(product.id)).toList();
+
+  @override
+  Future<void> createInvoice(InvoiceDraft draft) async {
+    invoiceDrafts.add(draft);
+  }
 }
