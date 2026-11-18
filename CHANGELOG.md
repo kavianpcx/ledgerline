@@ -6,7 +6,11 @@
 - Ask owners to confirm the currency of legacy records without changing amounts.
 - Lock base currency changes once monetary history exists.
 - Add integer-only amount parsing and formatting for decimal and zero-decimal currencies, including IRR and the internal TOMAN unit.
-- Add currency precision, Iranian unit conversion, and repository currency-safety tests.
+- Add currency precision, exact rial/toman unit conversion, and repository currency-safety tests.
+- Add a product-catalog schema migration with description, category, barcode, update timestamps, and indexes.
+- Add database-backed product search, sorting, and pagination for 10/25/50/100 rows per page.
+- Add product editing that preserves historical invoice line values and posts inventory valuation changes when on-hand stock cost changes.
+- Add migration, catalog paging, invoice history, and 10,000-product tests.
 
 
 ## 0.5.1-beta.1

@@ -18,9 +18,11 @@ The current v0.5.1-beta.1 release provides a basic single-device Windows ledger 
 
 PR [#2](https://github.com/kavianpcx/ledgerline/pull/2) restored permanent left-side Windows navigation at wide, medium, and narrow widths. The successful [PR workflow](https://github.com/kavianpcx/ledgerline/actions/runs/44306432838) built and smoke-installed the installer, ran the test matrix, and captured Windows sidebar and settings scenarios. The screenshots are retained as CI artifacts; they have not been manually pixel-reviewed in this workspace. High-DPI and Windows Snap behavior have not been separately verified.
 
-## Current development work
+## Current source and development work
 
-The follow-on currency-safety work is being implemented on `feature/currency-safety`. It adds explicit base-currency setup, integer minor-unit parsing for decimal and zero-decimal currencies, legacy-data confirmation, and a service-layer guard against recording amounts before setup. It does not add exchange rates, mixed-currency invoices, conversion, or complete jurisdiction-aware currency support. This work is not included in the published v0.5.1-beta.1 installer.
+Currency-safety PR [#3](https://github.com/kavianpcx/ledgerline/pull/3) is merged into `main` at `2f444d3e2e81aa927a42bba4fd272bc1900bbeb7`. The successful [CI run](https://github.com/kavianpcx/ledgerline/actions/runs/44326912497) passed analysis, all eight test files, Windows packaging and installer smoke checks, and captured eight Windows UI scenarios. Its workflow artifact includes the installer and screenshots. The screenshots have not been manually pixel-reviewed in this workspace. The source changes require a confirmed base currency before monetary writes, handle minor units with integer arithmetic, confirm the interpretation of legacy amounts, and lock the base currency once records exist. These source changes are not included in the published v0.5.1-beta.1 installer. There is still no mixed-currency accounting or exchange-rate conversion.
+
+The active `feature/product-catalog` work adds structured product details, an upgrade to schema v4, database-backed search/sorting/pagination, product editing, and tests for invoice history and 10,000-row catalogs. It is not merged or included in a release until its GitHub checks pass.
 
 ## Known limitations
 
