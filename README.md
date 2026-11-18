@@ -16,7 +16,7 @@ The existing Windows release provides:
 - SQLite backup export and integrity-checked restore with the previous database retained as a recovery copy.
 - A custom Windows caption area, keyboard shortcuts, Windows installer, and GitHub Actions build/test workflow.
 
-The left Windows sidebar repair is in active development on [PR #2](https://github.com/kavianpcx/ledgerline/pull/2). Its Windows build, narrow-window screenshots, and test run must complete before that change is treated as verified.
+The left Windows sidebar repair was merged in [PR #2](https://github.com/kavianpcx/ledgerline/pull/2). The successful [Windows workflow](https://github.com/kavianpcx/ledgerline/actions/runs/44306432838) built and smoke-installed the Windows installer, ran the test matrix, and captured wide, medium, and narrow sidebar plus title bar, theme, Persian, and currency-selector screenshots. The workflow artifacts are available from that run. High-DPI and Snap behavior have not been separately verified.
 
 ## Current limitations
 
