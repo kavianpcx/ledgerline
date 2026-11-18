@@ -529,6 +529,14 @@ class LedgerRepository {
   }
 
   Future<void> saveAppSettings(AppSettings settings) async {
+    final requestedCurrencyCode = settings.currencyCode.toUpperCase();
+    if (!_supportedCurrencies.contains(requestedCurrencyCode)) {
+      throw ArgumentError.value(
+        settings.currencyCode,
+        'currencyCode',
+        'Unsupported currency.',
+      );
+    }
     final database = _database.handle;
     await database.transaction((txn) async {
       final rows = await txn.query(
@@ -544,7 +552,7 @@ class LedgerRepository {
       final wasConfigured = currentSettings['accounting_currency_configured'] == 'true';
       final hasData = await _hasMonetaryData(txn);
       if (hasData &&
-          settings.currencyCode != currentCode &&
+          requestedCurrencyCode != currentCode &&
           (wasConfigured || !settings.accountingCurrencyConfigured)) {
         throw StateError('Use the currency confirmation workflow before changing the base currency.');
       }
@@ -565,7 +573,7 @@ class LedgerRepository {
         {'setting_key': 'business_name', 'setting_value': settings.businessName.trim()},
         conflictAlgorithm: ConflictAlgorithm.replace);
       await txn.insert('app_settings',
-        {'setting_key': 'currency_code', 'setting_value': settings.currencyCode.toUpperCase()},
+        {'setting_key': 'currency_code', 'setting_value': requestedCurrencyCode},
         conflictAlgorithm: ConflictAlgorithm.replace);
       await txn.insert('app_settings',
         {'setting_key': 'accounting_currency_configured', 'setting_value': '${configured}'},

@@ -44,6 +44,22 @@ void main() {
     expect((await repository.loadSnapshot()).assetsCents, 100);
   });
 
+  test('rejects unsupported currency settings', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+
+    await expectLater(
+      repository.saveAppSettings(
+        AppSettings.defaults.copyWith(currencyCode: 'XYZ'),
+      ),
+      throwsArgumentError,
+    );
+    expect((await repository.loadAppSettings()).currencyCode, 'USD');
+    expect((await repository.loadAppSettings()).accountingCurrencyConfigured, isFalse);
+  });
+
   test('legacy currency confirmation checks all monetary records', () async {
     final database = await LedgerDatabase.openInMemory();
     addTearDown(database.close);
