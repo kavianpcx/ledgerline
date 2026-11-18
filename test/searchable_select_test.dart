@@ -62,7 +62,7 @@ void main() {
       'Currency option 39',
     );
     await tester.pumpAndSettle();
-    expect(find.text('Currency option 39'), findsOneWidget);
+    expect(find.text('Currency option 39'), findsNWidgets(2));
     expect(popupRect.height, lessThanOrEqualTo(320));
   });
 
