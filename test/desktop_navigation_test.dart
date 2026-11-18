@@ -85,9 +85,9 @@ void main() {
 
     await tester.enterText(find.byKey(const Key('desktop-sidebar-search-field')), 'Products');
     await tester.pumpAndSettle();
-    expect(find.text('Products'), findsOneWidget);
-    expect(find.text('Entries'), findsNothing);
-    await tester.tap(find.text('Products'));
+    expect(find.byKey(const Key('desktop-sidebar-destination-3')), findsOneWidget);
+    expect(find.byKey(const Key('desktop-sidebar-destination-1')), findsNothing);
+    await tester.tap(find.byKey(const Key('desktop-sidebar-destination-3')));
     expect(selected, [3]);
   });
 
@@ -115,8 +115,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, 'Products');
     await tester.pumpAndSettle();
-    expect(find.text('Products'), findsOneWidget);
-    await tester.tap(find.text('Products'));
+    expect(find.byKey(const Key('desktop-navigation-search-result-3')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('desktop-navigation-search-result-3')));
     await tester.pumpAndSettle();
     expect(selected, [3]);
   });
