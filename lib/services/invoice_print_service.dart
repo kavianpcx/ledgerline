@@ -25,8 +25,16 @@ class InvoicePrintService {
     final textDirection =
         isPersian ? pw.TextDirection.rtl : pw.TextDirection.ltr;
     final isThermal = format == InvoicePrintFormat.thermal80;
-    final pageFormat =
-        isThermal ? PdfPageFormat.roll80 : PdfPageFormat.a4;
+    final receiptLineCount = invoice.lines.fold<int>(
+      0,
+      (count, line) => count + ((line.description.length + 27) ~/ 28),
+    );
+    final pageFormat = isThermal
+        ? PdfPageFormat(
+            80 * PdfPageFormat.mm,
+            (110 + receiptLineCount * 22) * PdfPageFormat.mm,
+          )
+        : PdfPageFormat.a4;
     final document = pw.Document(
       title: invoice.invoiceNumber,
       author: 'Ledgerline',
@@ -39,7 +47,11 @@ class InvoicePrintService {
         margin: isThermal
             ? const pw.EdgeInsets.fromLTRB(8, 12, 8, 12)
             : const pw.EdgeInsets.all(32),
-        theme: pw.ThemeData.withFont(base: regularFont, bold: boldFont),
+        theme: pw.ThemeData.withFont(
+          base: regularFont,
+          bold: boldFont,
+          fontFallback: [pw.Font.helvetica()],
+        ),
         textDirection: textDirection,
         header: (context) => _header(
           businessName: businessName,
