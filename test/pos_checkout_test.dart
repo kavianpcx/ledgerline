@@ -220,6 +220,51 @@ void main() {
     expect(savedCart, isEmpty);
   });
 
+  testWidgets('checkout accepts a partial payment and shows the remaining balance',
+      (tester) async {
+    final repository = await _createWidgetRepository(tester);
+    addTearDown(() async {
+      await tester.runAsync(repository.close);
+    });
+
+    var refreshCount = 0;
+    await _mountPos(
+      tester,
+      repository,
+      const {},
+      onCompleted: () async {
+        refreshCount++;
+      },
+      onCartChanged: (_) {},
+    );
+
+    await tester.tap(find.byKey(const ValueKey('pos-product-COF-01')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('pos-checkout')));
+    await tester.tap(find.byKey(const Key('pos-checkout')));
+    await _pumpUntil(
+      tester,
+      () => find.byKey(const Key('pos-submit-checkout')).evaluate().isNotEmpty,
+    );
+
+    final amount = find.byKey(const Key('pos-payment-amount'));
+    await tester.enterText(amount, '11.00');
+    await tester.tap(find.byKey(const Key('pos-submit-checkout')));
+    await tester.pump();
+    expect(find.text('Payment cannot exceed the invoice total.'), findsOneWidget);
+    expect(refreshCount, 0);
+
+    await tester.enterText(amount, '4.50');
+    await tester.pump();
+    expect(find.text('USD 5.50'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('pos-submit-checkout')));
+    await _pumpUntil(tester, () => refreshCount == 1);
+
+    expect(repository.invoiceDrafts, hasLength(1));
+    expect(repository.invoiceDrafts.single.paymentAmountCents, 450);
+    expect(repository.invoiceDrafts.single.paymentMethod, 'cash');
+  });
+
   testWidgets('bank transfer checkout records the selected payment method',
       (tester) async {
     final repository = await _createWidgetRepository(tester);
@@ -357,6 +402,33 @@ void main() {
       snapshot.liabilitiesCents + snapshot.equityCents + snapshot.netIncomeCents,
     );
     expect(snapshot.entries, hasLength(3));
+  });
+
+  test('partial cash checkout posts the receipt and leaves a balanced receivable',
+      () async {
+    final repository = await _createRepository();
+    addTearDown(repository.close);
+    await _addTestProduct(repository);
+    final product = (await repository.loadProducts()).single;
+
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Walk-in customer',
+      date: DateTime(2026, 11, 18),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+      paymentAmountCents: 450,
+    ));
+
+    final snapshot = await repository.loadSnapshot();
+    final invoice = snapshot.invoices.single;
+    expect(invoice.status, 'issued');
+    expect(invoice.paidCents, 450);
+    expect(invoice.balanceDueCents, 550);
+    expect(snapshot.balancesByAccount['cash'], 450);
+    expect(snapshot.balancesByAccount['receivables'], 550);
+    expect(
+      snapshot.assetsCents,
+      snapshot.liabilitiesCents + snapshot.equityCents + snapshot.netIncomeCents,
+    );
   });
 
   test('bank transfer checkout posts to the bank account and records its method',
