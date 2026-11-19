@@ -76,44 +76,44 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
         autofocus: true,
         onKeyEvent: _handlePosKeyboardShortcuts,
         child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(tr(context, 'pointOfSale'), style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 6),
-          Text(
-            tr(context, 'posSubtitle'),
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
-          Text(
-            tr(context, 'posKeyboardShortcuts'),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-          ),
-          const SizedBox(height: 16),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              if (constraints.maxWidth < 900) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(tr(context, 'pointOfSale'), style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 6),
+            Text(
+              tr(context, 'posSubtitle'),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+            Text(
+              tr(context, 'posKeyboardShortcuts'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 16),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth < 900) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _catalogPanel(),
+                      const SizedBox(height: 16),
+                      _cartPanel(),
+                    ],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _catalogPanel(),
-                    const SizedBox(height: 16),
-                    _cartPanel(),
+                    Expanded(flex: 6, child: _catalogPanel()),
+                    const SizedBox(width: 16),
+                    Expanded(flex: 5, child: _cartPanel()),
                   ],
                 );
-              }
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 6, child: _catalogPanel()),
-                  const SizedBox(width: 16),
-                  Expanded(flex: 5, child: _cartPanel()),
-                ],
-              );
-            },
-          ),
-        ],
+              },
+            ),
+          ],
         ),
       );
 

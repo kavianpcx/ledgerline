@@ -4,7 +4,7 @@
 
 This audit compares the current GitHub source with docs/PRODUCT_SPECIFICATION.md and distinguishes merged code from remaining work.
 
-PR #14 was merged as `268b9e6918ce40eb41f4f1a1982203998ff9059b`. [PR workflow run 44468078824](https://github.com/kavianpcx/ledgerline/actions/runs/44468078824) passed analysis, all ten test suites, Windows release packaging, installer packaging, and UI evidence capture. Post-merge [run 44469710895](https://github.com/kavianpcx/ledgerline/actions/runs/44469710895) has passed analysis and all ten test suites; its Windows job is still running. The screenshots were captured but not manually reviewed.
+PR #14 was merged as `268b9e6918ce40eb41f4f1a1982203998ff9059b`. [PR workflow run 44468078824](https://github.com/kavianpcx/ledgerline/actions/runs/44468078824) passed analysis, all ten test suites, Windows release packaging, installer packaging, and UI evidence capture. Post-merge [run 44469710895](https://github.com/kavianpcx/ledgerline/actions/runs/44469710895) passed analysis, all ten test suites, Windows release packaging, installer packaging, and UI evidence capture. The screenshots were captured but not manually reviewed.
 
 PR #2 through #14 provide Windows sidebar repair, currency safeguards, editable and paginated catalog, reviewed CSV/XLSX import, transactional POS, barcode lookup, partial and split receipts, invoice payment history and reconciliation, configurable default sales tax, invoice discounts, full-invoice returns, and product images/icons. The v7 migration links existing manual payments only when date, amount, method, and invoice description match; unmatched receipts remain flagged for review. Schema v8 stores discounts on new invoices and migrates older invoices with a zero discount. Schema v9 records full-invoice returns and customer-return stock movements. Schema v10 adds built-in product icons and optional product-image BLOBs.
 
@@ -31,7 +31,7 @@ Full-invoice refunds/returns are implemented on main; partial-line returns, invo
 ## Incomplete product functionality
 
 - Accounting: no complete general ledger/report suite, full receivables/payables workflows, full reversals/refunds, foreign-currency conversion, transaction-currency snapshots, or configurable jurisdiction rules.
-- Product/inventory: product images/icons, editable products, catalog search/pagination, reviewed CSV import, and product barcode lookup work. Variants, suppliers, multiple warehouses, receiving/purchasing, purchase/partial-line returns/transfers, serial/batch tracking, barcode labels, and stock-count workflow remain open.
+- Product/inventory: product images/icons, editable products, catalog search/pagination, reviewed CSV/XLSX import, and product barcode lookup work. Variants, suppliers, multiple warehouses, receiving/purchasing, purchase/partial-line returns/transfers, serial/batch tracking, barcode labels, and stock-count workflow remain open.
 - Smart Import: reviewed CSV/XLSX product import and offline image-to-text OCR exist on main. DOCX/PDF table parsing, document classification, OCR-to-structured fields, confidence scoring, and reviewed financial-import drafts remain unfinished.
 - People/operations: no service-layer employee roles, manager area, shifts, idempotent daily close, payroll, or protected management dashboard.
 - Security/sync: no authenticated pairing, transport policy, conflict handling, cross-device duplicate-post prevention, application-encrypted database/backups, credential vault, or verified account recovery.

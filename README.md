@@ -20,7 +20,7 @@ PR [#2](https://github.com/kavianpcx/ledgerline/pull/2) restored permanent left-
 
 ## Current source and development work
 
-PRs #3 through #14 are merged into `main`. PR #14's merge commit is `268b9e6918ce40eb41f4f1a1982203998ff9059b`; [PR workflow run 44468078824](https://github.com/kavianpcx/ledgerline/actions/runs/44468078824) passed analysis, all ten test suites, the Windows release build, installer packaging, and UI evidence capture. Post-merge [run 44469710895](https://github.com/kavianpcx/ledgerline/actions/runs/44469710895) has passed analysis and all ten test suites; its Windows job is still running. Screenshots were captured but not manually pixel-reviewed, so visual acceptance remains open.
+PRs #3 through #14 are merged into `main`. PR #14's merge commit is `268b9e6918ce40eb41f4f1a1982203998ff9059b`; [PR workflow run 44468078824](https://github.com/kavianpcx/ledgerline/actions/runs/44468078824) passed analysis, all ten test suites, the Windows release build, installer packaging, and UI evidence capture. Post-merge [run 44469710895](https://github.com/kavianpcx/ledgerline/actions/runs/44469710895) passed analysis, all ten test suites, the Windows release build, installer packaging, and UI evidence capture. Screenshots were captured but not manually pixel-reviewed, so visual acceptance remains open.
 
 The POS supports split cash and bank-transfer tenders, invoice payment history, receipt-to-journal reconciliation, a saved default tax rate, invoice discounts, and full-invoice returns with stock and ledger reversals. Schema v7 links older receipts only when the journal match is exact; unmatched history remains flagged for review. These changes are not part of the published Windows release. Partial-line returns remain open.
 
