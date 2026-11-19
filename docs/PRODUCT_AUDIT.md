@@ -39,7 +39,7 @@ Split tenders, payment history/reconciliation, refunds/returns, receipts/printin
 
 ## Risks and verification limits
 
-CI proves only the checks included in a workflow. Manual review of run #90, #91, and #94 Windows UI artifacts found blank application windows; capture success alone is not visual acceptance. High-DPI, resize-edge, drag, Snap, Android hardware, and physical-device camera behavior remain unverified. The application is not ready for sensitive multi-user or multi-device production use.
+CI proves only the checks included in a workflow. Manual review of the PR #6 and PR #7 Windows UI artifacts found blank application windows; capture success alone is not visual acceptance. High-DPI, resize-edge, drag, Snap, Android hardware, and physical-device camera behavior remain unverified. The application is not ready for sensitive multi-user or multi-device production use.
 
 ## Next implementation order
 

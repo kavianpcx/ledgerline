@@ -756,7 +756,8 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
           width: 420,
           child: Form(
             key: _formKey,
-            child: Column(
+            child: SingleChildScrollView(
+              child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -856,6 +857,7 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
                   ],
                 ),
               ],
+              ),
             ),
           ),
         ),
