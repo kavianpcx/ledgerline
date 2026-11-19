@@ -292,6 +292,17 @@ void main() {
             (payment['amount_cents']! as int),
     };
     expect(paidByMethod, {'cash': 4000, 'bank_transfer': 6000});
+    final paymentHistory = await repository.loadInvoicePaymentHistory(invoice.id);
+    expect(paymentHistory, isNotNull);
+    expect(paymentHistory!.recordedCents, 10000);
+    expect(paymentHistory.payments, hasLength(2));
+    expect(paymentHistory.invoiceStatusMatchesPayments, isTrue);
+    expect(paymentHistory.journalPostingsMatch, isTrue);
+    expect(paymentHistory.isReconciled, isTrue);
+    expect(
+      paymentHistory.payments.map((payment) => payment.journalEntryId).toSet(),
+      payments.map((payment) => payment['id'] as String).toSet(),
+    );
 
     await expectLater(
       repository.createInvoice(InvoiceDraft(
@@ -488,6 +499,126 @@ void main() {
       snapshot.assetsCents,
       snapshot.liabilitiesCents + snapshot.equityCents + snapshot.netIncomeCents,
     );
+  });
+
+  test('flags invoice payments whose cash or bank journal posting differs', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await repository.createProduct(const ProductDraft(
+      sku: 'MUG-RECONCILE',
+      name: 'Reconciliation mug',
+      unitPriceCents: 10000,
+      unitCostCents: 4000,
+      stockQuantity: 2,
+    ));
+    final product = (await repository.loadProducts()).single;
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Reconciliation customer',
+      date: DateTime(2026, 11, 19),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+      paymentAmountCents: 4000,
+    ));
+    final invoice = (await repository.loadSnapshot()).invoices.single;
+    final initial = await repository.loadInvoicePaymentHistory(invoice.id);
+    expect(initial!.isReconciled, isTrue);
+    final payment = initial.payments.single;
+    expect(payment.journalEntryId, isNotNull);
+    await database.handle.update(
+      'journal_lines',
+      {'debit_cents': 3999},
+      where: 'entry_id = ? AND account_id = ?',
+      whereArgs: [payment.journalEntryId, 'cash'],
+    );
+
+    final mismatched =
+        await repository.loadInvoicePaymentHistory(invoice.id);
+    expect(mismatched, isNotNull);
+    expect(mismatched!.invoiceStatusMatchesPayments, isTrue);
+    expect(mismatched.journalPostingsMatch, isFalse);
+    expect(mismatched.isReconciled, isFalse);
+    expect(mismatched.payments.single.ledgerPostingMatches, isFalse);
+  });
+
+  test('links legacy invoice receipts to matching journal entries in v7', () async {
+    final directory =
+        await Directory.systemTemp.createTemp('ledgerline-payment-link-migration-');
+    addTearDown(() => directory.delete(recursive: true));
+    final path = '${directory.path}${Platform.pathSeparator}version-six.sqlite';
+    final versionSix = await LedgerDatabase.open(path);
+    final versionSixRepository = LedgerRepository(versionSix);
+    await versionSixRepository.initialize();
+    await versionSix.handle.insert('sales_invoices', {
+      'id': 'legacy-invoice-v6',
+      'invoice_number': 'INV-2026-000003',
+      'customer_name': 'Legacy customer',
+      'issue_date': '2026-01-04',
+      'status': 'paid',
+      'subtotal_cents': 4200,
+      'tax_cents': 0,
+      'total_cents': 4200,
+      'created_at': '2026-01-04T12:00:00Z',
+    });
+    await versionSix.handle.insert('journal_entries', {
+      'id': 'legacy-journal-v6',
+      'entry_date': '2026-01-04',
+      'description': 'Invoice payment INV-2026-000003 · Legacy customer',
+      'created_at': '2026-01-04T12:01:00Z',
+    });
+    await versionSix.handle.insert('journal_lines', {
+      'entry_id': 'legacy-journal-v6',
+      'account_id': 'cash',
+      'debit_cents': 4200,
+      'credit_cents': 0,
+    });
+    await versionSix.handle.insert('journal_lines', {
+      'entry_id': 'legacy-journal-v6',
+      'account_id': 'receivables',
+      'debit_cents': 0,
+      'credit_cents': 4200,
+    });
+    await versionSix.handle.execute('DROP TABLE invoice_payments');
+    await versionSix.handle.execute('''
+      CREATE TABLE invoice_payments (
+        id TEXT PRIMARY KEY,
+        invoice_id TEXT NOT NULL REFERENCES sales_invoices(id) ON DELETE CASCADE,
+        payment_date TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+        payment_method TEXT NOT NULL DEFAULT 'cash'
+          CHECK (payment_method IN ('cash', 'bank_transfer')),
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await versionSix.handle.execute(
+      'CREATE INDEX invoice_payments_by_invoice ON invoice_payments(invoice_id, payment_date DESC)',
+    );
+    await versionSix.handle.insert('invoice_payments', {
+      'id': 'legacy-receipt-v6',
+      'invoice_id': 'legacy-invoice-v6',
+      'payment_date': '2026-01-04',
+      'amount_cents': 4200,
+      'payment_method': 'cash',
+      'created_at': '2026-01-04T12:00:00Z',
+    });
+    await versionSix.handle.execute('PRAGMA user_version = 6');
+    await versionSix.close();
+
+    final migrated = await LedgerDatabase.open(path);
+    addTearDown(migrated.close);
+    final repository = LedgerRepository(migrated);
+    await repository.initialize();
+    final payments = await migrated.handle.query('invoice_payments');
+    expect(payments.single['journal_entry_id'], 'legacy-journal-v6');
+    final history =
+        await repository.loadInvoicePaymentHistory('legacy-invoice-v6');
+    expect(history, isNotNull);
+    expect(history!.payments.single.ledgerPostingMatches, isTrue);
+    expect(history.isReconciled, isTrue);
   });
 
   test('migrates legacy paid invoices into payment history', () async {
