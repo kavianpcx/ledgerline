@@ -1653,7 +1653,6 @@ class LedgerRepository {
         if (previous > quantity) {
           throw StateError('Existing invoice return quantity exceeds the sale.');
         }
-        allItemsReturned = allItemsReturned && previous == quantity;
       }
 
       for (final selection in selected) {
@@ -1731,15 +1730,28 @@ class LedgerRepository {
           throw StateError('Existing invoice return line allocations are inconsistent.');
         }
         final lineValue = netRevenue + lineTax;
-        if (lineValue < 0 || lineValue !=
-            _roundedShare(
-              fullLineValue,
-              previousQuantity + quantity,
-              originalQuantity,
-            ) - previousExpectedValue) {
+        if (lineValue < 0 ||
+            previousRevenue !=
+                _roundedShare(
+                  allocation.netRevenueCents,
+                  previousQuantity,
+                  originalQuantity,
+                ) ||
+            previousTax !=
+                _roundedShare(
+                  allocation.taxCents,
+                  previousQuantity,
+                  originalQuantity,
+                ) ||
+            lineValue !=
+                _roundedShare(
+                  fullLineValue,
+                  previousQuantity + quantity,
+                  originalQuantity,
+                ) -
+                    previousExpectedValue) {
           throw StateError('Invoice return line allocation is inconsistent.');
         }
-        final line = lineRows.single;
         returnLines.add((
           invoiceLine: line,
           product: product,
