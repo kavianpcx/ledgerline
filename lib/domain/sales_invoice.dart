@@ -42,18 +42,52 @@ class InvoiceDraft {
   final List<InvoiceTenderDraft> additionalPayments;
 }
 
+class InvoiceReturnLineDraft {
+  const InvoiceReturnLineDraft({
+    required this.invoiceLineId,
+    required this.quantity,
+  });
+
+  final int invoiceLineId;
+  final int quantity;
+}
+
 class InvoiceReturnDraft {
   const InvoiceReturnDraft({
     required this.invoiceId,
     required this.date,
     required this.reason,
     this.refundMethod = 'cash',
+    this.lines = const [],
   });
 
   final String invoiceId;
   final DateTime date;
   final String reason;
   final String refundMethod;
+  final List<InvoiceReturnLineDraft> lines;
+}
+
+class InvoiceReturnableLine {
+  const InvoiceReturnableLine({
+    required this.invoiceLineId,
+    required this.description,
+    required this.originalQuantity,
+    required this.returnedQuantity,
+    required this.availableQuantity,
+    required this.unitPriceCents,
+    required this.remainingLineValueCents,
+    required this.productAvailable,
+  });
+
+  final int invoiceLineId;
+  final String description;
+  final int originalQuantity;
+  final int returnedQuantity;
+  final int availableQuantity;
+  final int unitPriceCents;
+  final int remainingLineValueCents;
+  final bool productAvailable;
 }
 
 class InvoicePaymentDraft {
@@ -154,6 +188,32 @@ class InvoiceReturnRecord {
   final bool ledgerPostingMatches;
 }
 
+class InvoicePartialReturnRecord {
+  const InvoicePartialReturnRecord({
+    required this.returnDate,
+    required this.reason,
+    required this.netRevenueCents,
+    required this.taxCents,
+    required this.returnValueCents,
+    required this.refundAmountCents,
+    required this.receivableCreditCents,
+    required this.refundMethod,
+    required this.journalEntryId,
+    required this.ledgerPostingMatches,
+  });
+
+  final DateTime returnDate;
+  final String reason;
+  final int netRevenueCents;
+  final int taxCents;
+  final int returnValueCents;
+  final int refundAmountCents;
+  final int receivableCreditCents;
+  final String refundMethod;
+  final String? journalEntryId;
+  final bool ledgerPostingMatches;
+}
+
 class InvoicePaymentHistory {
   const InvoicePaymentHistory({
     required this.invoiceId,
@@ -164,6 +224,7 @@ class InvoicePaymentHistory {
     required this.payments,
     required this.returnRecordExpected,
     this.returnRecord,
+    this.partialReturns = const [],
   });
 
   final String invoiceId;
@@ -174,27 +235,59 @@ class InvoicePaymentHistory {
   final List<InvoicePaymentRecord> payments;
   final bool returnRecordExpected;
   final InvoiceReturnRecord? returnRecord;
+  final List<InvoicePartialReturnRecord> partialReturns;
 
-  int get recordedCents =>
+  int get paymentTotalCents =>
       payments.fold<int>(0, (sum, payment) => sum + payment.amountCents);
 
-  int get balanceDueCents =>
-      returnRecordExpected || invoiceTotalCents <= recordedCents
+  int get totalRefundCents =>
+      partialReturns.fold<int>(
+        returnRecord?.refundAmountCents ?? 0,
+        (sum, item) => sum + item.refundAmountCents,
+      );
+
+  int get recordedCents =>
+      paymentTotalCents <= totalRefundCents
           ? 0
-          : invoiceTotalCents - recordedCents;
+          : paymentTotalCents - totalRefundCents;
+
+  int get partialReturnedCents =>
+      partialReturns.fold<int>(0, (sum, item) => sum + item.returnValueCents);
+
+  int get balanceDueCents {
+    if (returnRecordExpected || invoiceTotalCents <= partialReturnedCents) {
+      return 0;
+    }
+    final remainingValue = invoiceTotalCents - partialReturnedCents;
+    return remainingValue <= recordedCents ? 0 : remainingValue - recordedCents;
+  }
 
   bool get invoiceStatusMatchesPayments {
-    if (invoiceStatus == 'void') return recordedCents == 0;
-    if (recordedCents > invoiceTotalCents) return false;
+    if (invoiceStatus == 'void') return paymentTotalCents == 0;
+    if (returnRecordExpected) {
+      final hasFinalReturn =
+          returnRecord != null ||
+          (partialReturns.isNotEmpty &&
+              partialReturnedCents == invoiceTotalCents);
+      return hasFinalReturn && balanceDueCents == 0;
+    }
+    if (partialReturnedCents > invoiceTotalCents) return false;
+    final remainingValue = invoiceTotalCents - partialReturnedCents;
+    if (recordedCents > remainingValue) return false;
     final expectedStatus =
-        recordedCents == invoiceTotalCents ? 'paid' : 'issued';
+        recordedCents == remainingValue ? 'paid' : 'issued';
     return invoiceStatus == expectedStatus;
   }
 
   bool get journalPostingsMatch =>
+      totalRefundCents <= paymentTotalCents &&
       payments.every((payment) => payment.ledgerPostingMatches) &&
+      partialReturns.every((record) => record.ledgerPostingMatches) &&
       (returnRecordExpected
-          ? returnRecord?.ledgerPostingMatches == true
+          ? returnRecord?.ledgerPostingMatches == true ||
+              (returnRecord == null &&
+                  partialReturns.isNotEmpty &&
+                  partialReturnedCents == invoiceTotalCents)
           : returnRecord == null);
 
   bool get isReconciled =>
