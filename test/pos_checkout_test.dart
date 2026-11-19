@@ -263,7 +263,9 @@ void main() {
       onCartChanged: (_) {},
     );
 
-    await tester.tap(find.byKey(const Key('pos-checkout')));
+    final checkoutButton = find.byKey(const Key('pos-checkout'));
+    await tester.ensureVisible(checkoutButton);
+    await tester.tap(checkoutButton);
     await _pumpUntil(
       tester,
       () => find.byKey(const Key('pos-submit-checkout')).evaluate().isNotEmpty,
