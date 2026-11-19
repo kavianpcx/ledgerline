@@ -678,6 +678,7 @@ class LedgerRepository {
     if (draft.customerName.trim().isEmpty ||
         draft.lines.isEmpty ||
         draft.taxCents < 0 ||
+        draft.discountCents < 0 ||
         draft.paymentAmountCents < 0) {
       throw ArgumentError(
         'Customer, invoice lines, tax, and payment amounts must be valid.',
@@ -736,10 +737,14 @@ class LedgerRepository {
       if (subtotal <= 0) {
         throw ArgumentError('Invoice total must be greater than zero.');
       }
-      if (draft.taxCents > maxSignedInt - subtotal) {
+      if (draft.discountCents > subtotal) {
+        throw ArgumentError('Discount cannot exceed the invoice subtotal.');
+      }
+      final discountedSubtotal = subtotal - draft.discountCents;
+      if (draft.taxCents > maxSignedInt - discountedSubtotal) {
         throw ArgumentError('Invoice total exceeds the supported integer range.');
       }
-      final total = subtotal + draft.taxCents;
+      final total = discountedSubtotal + draft.taxCents;
       if (draft.paymentAmountCents == 0 && draft.additionalPayments.isNotEmpty) {
         throw ArgumentError('Additional tenders require an initial payment.');
       }
@@ -786,6 +791,7 @@ class LedgerRepository {
         'status': collectedPaymentCents == total ? 'paid' : 'issued',
         'subtotal_cents': subtotal,
         'tax_cents': draft.taxCents,
+        'discount_cents': draft.discountCents,
         'total_cents': total,
         'created_at': createdAt,
       });
@@ -838,6 +844,14 @@ class LedgerRepository {
         'debit_cents': 0,
         'credit_cents': subtotal,
       });
+      if (draft.discountCents > 0) {
+        await txn.insert('journal_lines', {
+          'entry_id': journalId,
+          'account_id': 'sales-income',
+          'debit_cents': draft.discountCents,
+          'credit_cents': 0,
+        });
+      }
       if (draft.taxCents > 0) {
         await txn.insert('journal_lines', {
           'entry_id': journalId,
@@ -1066,6 +1080,11 @@ class LedgerRepository {
     return debitMatches && receivableMatches;
   }
 
+  int _parseDefaultTaxRateBasisPoints(String? value) {
+    final parsed = int.tryParse(value ?? '');
+    return parsed != null && parsed >= 0 && parsed <= 10000 ? parsed : 0;
+  }
+
   Future<AppSettings> loadAppSettings() async {
     final rows = await _database.handle.query('app_settings');
     final values = {
@@ -1081,6 +1100,7 @@ class LedgerRepository {
           : 'USD',
       accountingCurrencyConfigured: values['accounting_currency_configured'] == 'true',
       desktopSidebarCollapsed: values['desktop_sidebar_collapsed'] == 'true',
+      defaultTaxRateBasisPoints: _parseDefaultTaxRateBasisPoints(values['default_tax_rate_basis_points']),
     );
   }
 
@@ -1155,6 +1175,14 @@ class LedgerRepository {
   }
 
   Future<void> saveAppSettings(AppSettings settings) async {
+    if (settings.defaultTaxRateBasisPoints < 0 ||
+        settings.defaultTaxRateBasisPoints > 10000) {
+      throw ArgumentError.value(
+        settings.defaultTaxRateBasisPoints,
+        'defaultTaxRateBasisPoints',
+        'Tax rate must be between 0 and 100 percent.',
+      );
+    }
     final requestedCurrencyCode = settings.currencyCode.toUpperCase();
     if (!_supportedCurrencies.contains(requestedCurrencyCode)) {
       throw ArgumentError.value(
@@ -1206,6 +1234,9 @@ class LedgerRepository {
         conflictAlgorithm: ConflictAlgorithm.replace);
       await txn.insert('app_settings',
         {'setting_key': 'desktop_sidebar_collapsed', 'setting_value': '${settings.desktopSidebarCollapsed}'},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
+        {'setting_key': 'default_tax_rate_basis_points', 'setting_value': '${settings.defaultTaxRateBasisPoints}'},
         conflictAlgorithm: ConflictAlgorithm.replace);
     });
   }

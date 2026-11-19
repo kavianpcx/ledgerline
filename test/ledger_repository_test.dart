@@ -13,6 +13,68 @@ import 'package:ledgerline/domain/sales_invoice.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('default sales tax rate is stored and validated as basis points',
+      () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+
+    await repository.saveAppSettings(
+      (await repository.loadAppSettings()).copyWith(
+        defaultTaxRateBasisPoints: 825,
+      ),
+    );
+
+    expect((await repository.loadAppSettings()).defaultTaxRateBasisPoints, 825);
+    await expectLater(
+      repository.saveAppSettings(
+        (await repository.loadAppSettings()).copyWith(
+          defaultTaxRateBasisPoints: 10001,
+        ),
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('v7 invoices migrate with a zero discount and preserve totals', () async {
+    final directory = await Directory.systemTemp.createTemp('ledgerline-v7-invoice-');
+    addTearDown(() => directory.delete(recursive: true));
+    final path = directory.path + Platform.pathSeparator + 'legacy.sqlite';
+    sqfliteFfiInit();
+    final legacy = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 7,
+        onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE sales_invoices (
+              id TEXT PRIMARY KEY,
+              subtotal_cents INTEGER NOT NULL,
+              tax_cents INTEGER NOT NULL,
+              total_cents INTEGER NOT NULL
+            )
+          ''');
+        },
+      ),
+    );
+    await legacy.insert('sales_invoices', {
+      'id': 'legacy-invoice',
+      'subtotal_cents': 1250,
+      'tax_cents': 100,
+      'total_cents': 1350,
+    });
+    await legacy.close();
+
+    final upgraded = await LedgerDatabase.open(path);
+    addTearDown(upgraded.close);
+    final invoice = (await upgraded.handle.query('sales_invoices')).single;
+    expect(invoice['discount_cents'], 0);
+    expect(invoice['subtotal_cents'], 1250);
+    expect(invoice['tax_cents'], 100);
+    expect(invoice['total_cents'], 1350);
+  });
+
   test('requires a confirmed base currency before monetary writes', () async {
     final database = await LedgerDatabase.openInMemory();
     addTearDown(database.close);

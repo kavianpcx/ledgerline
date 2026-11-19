@@ -51,6 +51,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   int _settingsSectionIndex = 0;
   late Future<LedgerSnapshot> _snapshot;
   late final TextEditingController _businessNameController;
+  late final TextEditingController _taxRateController;
   late final UpdateService _updateService;
   bool _checkingUpdates = false;
   bool _downloadingUpdate = false;
@@ -107,6 +108,9 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     }
     _snapshot = widget.repository.loadSnapshot();
     _businessNameController = TextEditingController(text: widget.settings.businessName);
+    _taxRateController = TextEditingController(
+      text: _formatTaxRate(widget.settings.defaultTaxRateBasisPoints),
+    );
     _productSearchController = TextEditingController();
     _productSearchController.addListener(_onProductSearchChanged);
     _updateService = const UpdateService();
@@ -121,6 +125,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     _businessNameController.dispose();
+    _taxRateController.dispose();
     _productSearchDebounce?.cancel();
     _productSearchController.removeListener(_onProductSearchChanged);
     _productSearchController.dispose();
@@ -497,6 +502,38 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  String _formatTaxRate(int basisPoints) {
+    final whole = basisPoints ~/ 100;
+    final fraction = basisPoints % 100;
+    return fraction == 0 ? '$whole' : '$whole.' + fraction.toString().padLeft(2, '0');
+  }
+
+  int? _parseTaxRate(String value) {
+    final normalized = value.trim().replaceAll(',', '.');
+    final match = RegExp(r'^(\d{1,3})(?:\.(\d{1,2}))?$').firstMatch(normalized);
+    if (match == null) return null;
+    final whole = int.parse(match.group(1)!);
+    final fraction = int.parse((match.group(2) ?? '').padRight(2, '0'));
+    final basisPoints = whole * 100 + fraction;
+    return basisPoints <= 10000 ? basisPoints : null;
+  }
+
+  Future<void> _saveDefaultTaxRate() async {
+    final basisPoints = _parseTaxRate(_taxRateController.text);
+    if (basisPoints == null) {
+      _notify(tr(context, 'invalidTaxRate'));
+      return;
+    }
+    try {
+      await widget.onSettingsChanged(
+        widget.settings.copyWith(defaultTaxRateBasisPoints: basisPoints),
+      );
+      if (mounted) _notify(tr(context, 'settingsSaved'));
+    } on Object catch (error) {
+      if (mounted) _notify(tr(context, 'errorCouldNotSave') + ': ' + error.toString());
+    }
+  }
+
   Future<void> _saveBusinessName() async {
     await widget.onSettingsChanged(
       widget.settings.copyWith(businessName: _businessNameController.text.trim()),
@@ -559,6 +596,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
       final recoveryPath = await widget.repository.restoreBackup(backupPath);
       final restoredSettings = await widget.repository.loadAppSettings();
       _businessNameController.text = restoredSettings.businessName;
+      _taxRateController.text = _formatTaxRate(restoredSettings.defaultTaxRateBasisPoints);
       await widget.onSettingsChanged(restoredSettings);
       await _reload();
       if (mounted) {
@@ -788,6 +826,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
       8 => PointOfSalePage(
           repository: widget.repository,
           currencyCode: widget.settings.currencyCode,
+          taxRateBasisPoints: widget.settings.defaultTaxRateBasisPoints,
           beforeCheckout: _requireAccountingCurrency,
           initialCart: _posCart,
           onCartChanged: (cart) {
@@ -1424,6 +1463,27 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
           children: [
             Text('${snapshot.invoices.length} ${tr(context, 'invoices').toLowerCase()}'),
             const SizedBox(height: 12),
+            TextField(
+              key: const Key('settings-default-tax-rate'),
+              controller: _taxRateController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                labelText: tr(context, 'defaultTaxRate'),
+                suffixText: '%',
+              ),
+              onSubmitted: (_) => _saveDefaultTaxRate(),
+            ),
+            const SizedBox(height: 10),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: FilledButton.tonalIcon(
+                key: const Key('save-default-tax-rate'),
+                onPressed: _saveDefaultTaxRate,
+                icon: const Icon(Icons.percent_rounded),
+                label: Text(tr(context, 'saveTaxRate')),
+              ),
+            ),
+            const SizedBox(height: 14),
             Wrap(
               spacing: 10,
               runSpacing: 8,

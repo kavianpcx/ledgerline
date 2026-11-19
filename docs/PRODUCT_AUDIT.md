@@ -2,16 +2,16 @@
 
 ## Scope and evidence
 
-This audit compares the current GitHub source with docs/PRODUCT_SPECIFICATION.md and distinguishes merged code from work under review.
+This audit compares the current GitHub source with docs/PRODUCT_SPECIFICATION.md and distinguishes merged code from remaining work.
 
-At this snapshot, `main` is `c1eb2dd56f1242a178a38d43dca80d8d0c5e7802`. PRs #2 through #9 are merged: Windows sidebar repair, currency safeguards, editable and paginated catalog, reviewed CSV import, transactional POS, barcode lookup, partial receipts, and split tender checkout. Post-merge [workflow run 44447065073](https://github.com/kavianpcx/ledgerline/actions/runs/44447065073) passed analysis, all ten test suites, Windows release packaging, and UI evidence capture. The screenshots were not manually reviewed.
+PR #10 was merged as `ea9542effc418144c47b20018da5b46ccd557330`. Post-merge [workflow run 44451374234](https://github.com/kavianpcx/ledgerline/actions/runs/44451374234) passed analysis, all ten test suites, Windows release packaging, installer packaging, and UI evidence capture. The captured screenshots were not manually reviewed.
 
-Open PR #10, `feature/pos-payment-history`, adds per-invoice payment history and reconciliation. It links new receipt records to their journal entries, verifies the matching cash/bank debit and receivables credit, and includes a schema v7 migration that matches older payment rows only when date, amount, method, and invoice description agree. Unmatched rows remain visible for review. CI is running on the branch.
+PR #2 through #10 provide Windows sidebar repair, currency safeguards, editable and paginated catalog, reviewed CSV import, transactional POS, barcode lookup, partial and split receipts, invoice payment history, and receipt-to-journal reconciliation. The v7 migration links existing manual payments only when date, amount, method, and invoice description match; unmatched receipts remain flagged for review. PR #11 adds a saved default sales-tax rate and per-invoice discounts, including a v8 migration and balanced journal postings; its Actions results are pending and it is not part of main until merged.
 
 ## What works on main
 
 - Flutter Windows desktop application with integrated title bar, window controls, keyboard shortcuts, and permanent left sidebar.
-- SQLite schema v6 with accounts, journal entries and lines, products, invoices, invoice lines, payment method history, stock movement history, and application settings.
+- SQLite schema v7 with accounts, journal entries and lines, products, invoices, invoice lines, payment method and journal-entry history, stock movement history, and application settings.
 - Integer minor-unit accounting, confirmed/locked base currency, balanced journals, invoice sales/payments, and opening-inventory posting. Accounting remains limited to one base currency.
 - Editable product records with indexed database search, sorting, and pagination at 10/25/50/100 rows per page.
 - Reviewed CSV product import with mapping, validation, duplicate checks, and atomic catalog/opening-inventory posting.
@@ -21,11 +21,9 @@ Open PR #10, `feature/pos-payment-history`, adds per-invoice payment history and
 
 The tagged v0.5.1-beta.1 release predates the current currency, catalog, import, and POS changes. The verified distribution remains Windows-only.
 
-## POS work under review
+## POS gaps remaining
 
-PR #9 split-tender checkout is merged. Open PR #10 adds payment history and a reconciliation check that verifies each receipt against its linked cash/bank and receivables journal lines. It also provides a schema v7 migration and tests for linked legacy manual payments and mismatched postings.
-
-Refunds/returns, invoice and thermal receipts, keyboard shortcuts, configurable tax/discount, customer records, terminals, and restaurant workflows remain incomplete.
+Refunds/returns, invoice and thermal receipts, keyboard shortcuts, customer records, terminals, and restaurant workflows remain incomplete. Configurable default tax and invoice discounts are being reviewed in PR #11 and are not yet part of main.
 
 ## Incomplete product functionality
 
@@ -39,11 +37,11 @@ Refunds/returns, invoice and thermal receipts, keyboard shortcuts, configurable 
 
 ## Risks and verification limits
 
-CI proves only the checks included in a workflow. Manual review of the PR #6 and PR #7 Windows UI artifacts found blank application windows; later screenshot artifacts have not been manually reviewed. Capture success alone is not visual acceptance. The snapshot query loads the full product catalog while recent entries and invoices are capped at 200; large-data dashboard/report pagination and aggregation still need work. High-DPI, resize-edge, drag, Snap, Android hardware, and physical-device camera behavior remain unverified. The application is not ready for sensitive multi-user or multi-device production use.
+CI proves only the checks included in a workflow. Manual review of the PR #6 and PR #7 Windows UI artifacts found blank application windows; later screenshot artifacts, including PR #10, have not been manually reviewed. Capture success alone is not visual acceptance. The snapshot query loads the full product catalog while recent entries and invoices are capped at 200; large-data dashboard/report pagination and aggregation still need work. High-DPI, resize-edge, drag, Snap, Android hardware, and physical-device camera behavior remain unverified. The application is not ready for sensitive multi-user or multi-device production use.
 
 ## Next implementation order
 
-1. Finish and merge payment history/reconciliation, then add returns, refunds, and receipts.
+1. Add POS returns and refunds with linked stock and journal reversals, then invoice and thermal receipts.
 2. Add inventory purchasing, movement/accounting reconciliation, returns, and warehouse support.
 3. Add service-layer permissions, protected management, shifts, and idempotent close.
 4. Implement Android workflows and secure synchronization with explicit conflict and duplicate-posting rules.

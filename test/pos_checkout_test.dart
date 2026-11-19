@@ -69,6 +69,7 @@ Future<void> _mountPos(
   Map<String, PosCartLine> cart, {
   required Future<void> Function() onCompleted,
   required ValueChanged<Map<String, PosCartLine>> onCartChanged,
+  int taxRateBasisPoints = 0,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -78,6 +79,7 @@ Future<void> _mountPos(
           child: PointOfSalePage(
             repository: repository,
             currencyCode: 'USD',
+            taxRateBasisPoints: taxRateBasisPoints,
             beforeCheckout: () => true,
             onCheckoutCompleted: onCompleted,
             initialCart: cart,
@@ -218,6 +220,44 @@ void main() {
     expect(draft.lines.single.productId, _coffee.id);
     expect(draft.lines.single.expectedUnitPriceCents, 1000);
     expect(savedCart, isEmpty);
+  });
+
+  testWidgets('discount and default tax are calculated before payment',
+      (tester) async {
+    final repository = await _createWidgetRepository(tester);
+    addTearDown(() async {
+      await tester.runAsync(repository.close);
+    });
+
+    var refreshCount = 0;
+    await _mountPos(
+      tester,
+      repository,
+      const {},
+      onCompleted: () async {
+        refreshCount++;
+      },
+      onCartChanged: (_) {},
+      taxRateBasisPoints: 825,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('pos-product-COF-01')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('pos-checkout')));
+    await tester.tap(find.byKey(const Key('pos-checkout')));
+    await _pumpUntil(
+      tester,
+      () => find.byKey(const Key('pos-submit-checkout')).evaluate().isNotEmpty,
+    );
+    await tester.enterText(find.byKey(const Key('pos-discount-amount')), '1.00');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('pos-submit-checkout')));
+    await _pumpUntil(tester, () => refreshCount == 1);
+
+    final draft = repository.invoiceDrafts.single;
+    expect(draft.discountCents, 100);
+    expect(draft.taxCents, 74);
+    expect(draft.paymentAmountCents, 974);
   });
 
   testWidgets('checkout accepts a partial payment and shows the remaining balance',
@@ -464,6 +504,68 @@ void main() {
       snapshot.liabilitiesCents + snapshot.equityCents + snapshot.netIncomeCents,
     );
     expect(snapshot.entries, hasLength(3));
+  });
+
+  test('discounted and taxed sales post the net revenue and balanced totals',
+      () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await _addTestProduct(repository);
+    final product = (await repository.loadProducts()).single;
+
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Walk-in customer',
+      date: DateTime(2026, 11, 18),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+      discountCents: 100,
+      taxCents: 74,
+      paymentAmountCents: 974,
+    ));
+
+    final snapshot = await repository.loadSnapshot();
+    final invoice = snapshot.invoices.single;
+    expect(invoice.subtotalCents, 1000);
+    expect(invoice.discountCents, 100);
+    expect(invoice.taxCents, 74);
+    expect(invoice.totalCents, 974);
+    expect(snapshot.balancesByAccount['cash'], 974);
+    expect(snapshot.balancesByAccount['receivables'], 0);
+    expect(snapshot.netIncomeCents, 500);
+    expect(
+      snapshot.assetsCents,
+      snapshot.liabilitiesCents + snapshot.equityCents + snapshot.netIncomeCents,
+    );
+
+    final postedLines = await database.handle.query(
+      'journal_lines',
+      where: 'entry_id = ?',
+      whereArgs: ['journal_${invoice.id}'],
+    );
+    expect(
+      postedLines.any((line) =>
+          line['account_id'] == 'sales-income' &&
+          line['debit_cents'] == 100 &&
+          line['credit_cents'] == 0),
+      isTrue,
+    );
+
+    await expectLater(
+      repository.createInvoice(InvoiceDraft(
+        customerName: 'Invalid discount',
+        date: DateTime(2026, 11, 18),
+        lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+        discountCents: 1001,
+      )),
+      throwsArgumentError,
+    );
+    expect((await repository.loadSnapshot()).invoices, hasLength(1));
+    expect((await repository.loadProducts()).single.stockQuantity, 4);
   });
 
   test('partial cash checkout posts the receipt and leaves a balanced receivable',

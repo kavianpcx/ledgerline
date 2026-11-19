@@ -26,6 +26,7 @@ class InvoiceDraft {
     required this.date,
     required this.lines,
     this.taxCents = 0,
+    this.discountCents = 0,
     this.paymentAmountCents = 0,
     this.paymentMethod = 'cash',
     this.additionalPayments = const [],
@@ -35,6 +36,7 @@ class InvoiceDraft {
   final DateTime date;
   final List<InvoiceLineDraft> lines;
   final int taxCents;
+  final int discountCents;
   final int paymentAmountCents;
   final String paymentMethod;
   final List<InvoiceTenderDraft> additionalPayments;
@@ -121,6 +123,7 @@ class SalesInvoice {
     required this.status,
     required this.subtotalCents,
     required this.taxCents,
+    this.discountCents = 0,
     required this.totalCents,
     required this.paidCents,
   });
@@ -132,6 +135,7 @@ class SalesInvoice {
   final String status;
   final int subtotalCents;
   final int taxCents;
+  final int discountCents;
   final int totalCents;
   final int paidCents;
 
@@ -151,6 +155,7 @@ class SalesInvoice {
       status: status,
       subtotalCents: row['subtotal_cents']! as int,
       taxCents: row['tax_cents']! as int,
+      discountCents: row['discount_cents'] as int? ?? 0,
       totalCents: totalCents,
       paidCents: paidCents,
     );
