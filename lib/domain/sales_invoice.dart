@@ -307,6 +307,7 @@ class SalesInvoice {
     this.returnedAt,
     required this.totalCents,
     required this.paidCents,
+    this.returnedCents = 0,
   });
 
   final String id;
@@ -319,12 +320,16 @@ class SalesInvoice {
   final int discountCents;
   final DateTime? returnedAt;
   final int totalCents;
+  final int paidCents;
+  final int returnedCents;
 
   bool get isReturned => returnedAt != null;
-  final int paidCents;
 
-  int get balanceDueCents =>
-      isReturned || totalCents <= paidCents ? 0 : totalCents - paidCents;
+  int get balanceDueCents {
+    if (isReturned) return 0;
+    final remainingValue = totalCents - returnedCents;
+    return remainingValue <= paidCents ? 0 : remainingValue - paidCents;
+  }
 
   factory SalesInvoice.fromRow(Map<String, Object?> row) {
     final status = row['status']! as String;
@@ -345,6 +350,7 @@ class SalesInvoice {
           : DateTime.tryParse(row['returned_at']! as String),
       totalCents: totalCents,
       paidCents: paidCents,
+      returnedCents: row['returned_cents'] as int? ?? 0,
     );
   }
 }
