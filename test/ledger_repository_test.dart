@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ledgerline/domain/account.dart';
@@ -1207,6 +1208,137 @@ void main() {
     final snapshot = await repository.loadSnapshot();
     expect(snapshot.assetsCents,
         snapshot.liabilitiesCents + snapshot.equityCents + snapshot.netIncomeCents);
+  });
+
+  test('v9 products migrate with default media fields and keep catalog values',
+      () async {
+    final directory = await Directory.systemTemp.createTemp('ledgerline-v9-product-media-');
+    addTearDown(() => directory.delete(recursive: true));
+    final path = directory.path + Platform.pathSeparator + 'legacy.sqlite';
+    sqfliteFfiInit();
+    final legacy = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 9,
+        onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE products (
+              id TEXT PRIMARY KEY,
+              sku TEXT NOT NULL UNIQUE,
+              name TEXT NOT NULL,
+              unit_price_cents INTEGER NOT NULL,
+              unit_cost_cents INTEGER NOT NULL DEFAULT 0,
+              stock_quantity INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL,
+              description TEXT NOT NULL DEFAULT '',
+              category TEXT NOT NULL DEFAULT '',
+              barcode TEXT NOT NULL DEFAULT '',
+              updated_at TEXT NOT NULL DEFAULT ''
+            )
+          ''');
+        },
+      ),
+    );
+    await legacy.insert('products', {
+      'id': 'v9-product',
+      'sku': 'OLD-IMAGE',
+      'name': 'Legacy photo-free item',
+      'unit_price_cents': 1800,
+      'unit_cost_cents': 700,
+      'stock_quantity': 3,
+      'created_at': '2026-11-18T00:00:00.000Z',
+      'description': 'Keep this description',
+      'category': 'Legacy',
+      'barcode': '12345678',
+      'updated_at': '2026-11-18T00:00:00.000Z',
+    });
+    await legacy.close();
+
+    final upgraded = await LedgerDatabase.open(path);
+    addTearDown(upgraded.close);
+    final row = (await upgraded.handle.query('products')).single;
+    expect(row['id'], 'v9-product');
+    expect(row['sku'], 'OLD-IMAGE');
+    expect(row['unit_price_cents'], 1800);
+    expect(row['description'], 'Keep this description');
+    expect(row['category'], 'Legacy');
+    expect(row['barcode'], '12345678');
+    expect(row['icon_key'], 'inventory');
+    expect(row['image_bytes'], isNull);
+  });
+
+  test('product image and built-in icon survive edits and can be removed',
+      () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    final image = Uint8List.fromList([137, 80, 78, 71, 1, 2, 3]);
+    await repository.createProduct(ProductDraft(
+      sku: 'PHOTO-01',
+      name: 'Photo product',
+      unitPriceCents: 1800,
+      unitCostCents: 700,
+      stockQuantity: 0,
+      iconKey: 'restaurant',
+      imageBytes: image,
+    ));
+
+    var product = (await repository.loadProductPage()).products.single;
+    expect(product.iconKey, 'restaurant');
+    expect(product.imageBytes, image);
+
+    await repository.updateProduct(product.id, const ProductDraft(
+      sku: 'PHOTO-01',
+      name: 'Photo product edited',
+      unitPriceCents: 1900,
+      unitCostCents: 700,
+      stockQuantity: 0,
+    ));
+    product = (await repository.loadProductPage()).products.single;
+    expect(product.name, 'Photo product edited');
+    expect(product.iconKey, 'restaurant');
+    expect(product.imageBytes, image);
+
+    await repository.updateProduct(product.id, const ProductDraft(
+      sku: 'PHOTO-01',
+      name: 'Photo product edited',
+      unitPriceCents: 1900,
+      unitCostCents: 700,
+      stockQuantity: 0,
+      iconKey: 'tools',
+      clearImage: true,
+    ));
+    product = (await repository.loadProductPage()).products.single;
+    expect(product.iconKey, 'tools');
+    expect(product.imageBytes, isNull);
+
+    await expectLater(
+      repository.createProduct(ProductDraft(
+        sku: 'TOO-LARGE',
+        name: 'Oversized image',
+        unitPriceCents: 100,
+        unitCostCents: 0,
+        stockQuantity: 0,
+        imageBytes: Uint8List(productImageMaxBytes + 1),
+      )),
+      throwsArgumentError,
+    );
+    await expectLater(
+      repository.createProduct(const ProductDraft(
+        sku: 'BAD-ICON',
+        name: 'Unknown icon',
+        unitPriceCents: 100,
+        unitCostCents: 0,
+        stockQuantity: 0,
+        iconKey: 'not-a-built-in-icon',
+      )),
+      throwsArgumentError,
+    );
   });
 
   test('v3 product rows migrate without changing values', () async {

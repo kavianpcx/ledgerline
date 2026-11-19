@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -27,6 +28,28 @@ import '../services/update_service.dart';
 import 'app_strings.dart';
 import 'widgets/searchable_select.dart';
 import 'pos_page.dart';
+
+IconData _productIconData(String key) => switch (key) {
+      'shopping_bag' => Icons.shopping_bag_outlined,
+      'restaurant' => Icons.restaurant_outlined,
+      'beverage' => Icons.local_cafe_outlined,
+      'electronics' => Icons.devices_outlined,
+      'medicine' => Icons.medical_services_outlined,
+      'tools' => Icons.build_outlined,
+      'book' => Icons.menu_book_outlined,
+      _ => Icons.inventory_2_outlined,
+    };
+
+String _productIconLabelKey(String key) => switch (key) {
+      'shopping_bag' => 'productIconShoppingBag',
+      'restaurant' => 'productIconRestaurant',
+      'beverage' => 'productIconBeverage',
+      'electronics' => 'productIconElectronics',
+      'medicine' => 'productIconMedicine',
+      'tools' => 'productIconTools',
+      'book' => 'productIconBook',
+      _ => 'productIconInventory',
+    };
 
 class LedgerHomePage extends StatefulWidget {
   const LedgerHomePage({
@@ -1109,7 +1132,14 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         child: Column(
           children: [
             ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.inventory_2_outlined)),
+              leading: CircleAvatar(
+                backgroundImage: product.imageBytes == null
+                    ? null
+                    : MemoryImage(product.imageBytes!),
+                child: product.imageBytes == null
+                    ? Icon(_productIconData(product.iconKey))
+                    : null,
+              ),
               title: Text(product.name, style: const TextStyle(fontWeight: FontWeight.w700)),
               subtitle: Text([
                 product.sku,
@@ -2211,11 +2241,18 @@ class _ProductDialogState extends State<_ProductDialog> {
   late final TextEditingController _price;
   late final TextEditingController _cost;
   late final TextEditingController _stock;
+  late String _iconKey;
+  Uint8List? _imageBytes;
+  bool _imageChanged = false;
+  bool _clearImage = false;
+  String? _imageError;
 
   @override
   void initState() {
     super.initState();
     final product = widget.product;
+    _iconKey = product?.iconKey ?? 'inventory';
+    _imageBytes = product?.imageBytes;
     _sku = TextEditingController(text: product?.sku ?? '');
     _name = TextEditingController(text: product?.name ?? '');
     _description = TextEditingController(text: product?.description ?? '');
@@ -2271,6 +2308,86 @@ class _ProductDialogState extends State<_ProductDialog> {
                 ),
                 const SizedBox(height: 12),
                 TextFormField(controller: _category, decoration: InputDecoration(labelText: tr(context, 'productCategory'))),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 28,
+                      backgroundImage: _imageBytes == null
+                          ? null
+                          : MemoryImage(_imageBytes!),
+                      child: _imageBytes == null
+                          ? Icon(_productIconData(_iconKey))
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          OutlinedButton.icon(
+                            key: const Key('product-image-pick'),
+                            onPressed: _chooseImage,
+                            icon: const Icon(Icons.add_photo_alternate_outlined),
+                            label: Text(
+                              tr(
+                                context,
+                                _imageBytes == null
+                                    ? 'selectProductImage'
+                                    : 'replaceProductImage',
+                              ),
+                            ),
+                          ),
+                          if (_imageBytes != null)
+                            TextButton.icon(
+                              key: const Key('product-image-remove'),
+                              onPressed: _removeImage,
+                              icon: const Icon(Icons.delete_outline_rounded),
+                              label: Text(tr(context, 'removeProductImage')),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                if (_imageError != null)
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        _imageError!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  key: const Key('product-icon-select'),
+                  initialValue: _iconKey,
+                  decoration: InputDecoration(
+                    labelText: tr(context, 'productIcon'),
+                  ),
+                  items: [
+                    for (final iconKey in productIconKeys)
+                      DropdownMenuItem(
+                        value: iconKey,
+                        child: Row(
+                          children: [
+                            Icon(_productIconData(iconKey)),
+                            const SizedBox(width: 8),
+                            Text(tr(context, _productIconLabelKey(iconKey))),
+                          ],
+                        ),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => _iconKey = value);
+                  },
+                ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _description,
@@ -2347,6 +2464,77 @@ class _ProductDialogState extends State<_ProductDialog> {
   String? _required(String? value) =>
       value == null || value.trim().isEmpty ? 'Required.' : null;
 
+  Future<void> _chooseImage() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['png', 'jpg', 'jpeg', 'webp'],
+        allowMultiple: false,
+      );
+      if (!mounted || result == null) return;
+      final file = result.files.single;
+      if (file.size > productImageMaxUploadBytes) {
+        setState(() => _imageError = tr(context, 'productImageTooLarge'));
+        return;
+      }
+      final sourceBytes = file.bytes ??
+          (file.path == null ? null : await io.File(file.path!).readAsBytes());
+      if (sourceBytes == null || sourceBytes.isEmpty) {
+        setState(() => _imageError = tr(context, 'productImageReadFailed'));
+        return;
+      }
+      final codec = await ui.instantiateImageCodec(
+        sourceBytes,
+        targetWidth: 256,
+        targetHeight: 256,
+      );
+      Uint8List? thumbnail;
+      try {
+        final frame = await codec.getNextFrame();
+        try {
+          final data = await frame.image.toByteData(format: ui.ImageByteFormat.png);
+          if (data != null) {
+            thumbnail = Uint8List.fromList(
+              data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+            );
+          }
+        } finally {
+          frame.image.dispose();
+        }
+      } finally {
+        codec.dispose();
+      }
+      if (!mounted) return;
+      if (thumbnail == null) {
+        setState(() => _imageError = tr(context, 'productImageReadFailed'));
+        return;
+      }
+      if (thumbnail.length > productImageMaxBytes) {
+        setState(() => _imageError = tr(context, 'productImageProcessedTooLarge'));
+        return;
+      }
+      setState(() {
+        _imageBytes = thumbnail;
+        _imageChanged = true;
+        _clearImage = false;
+        _imageError = null;
+      });
+    } on Object catch (_) {
+      if (mounted) {
+        setState(() => _imageError = tr(context, 'productImageReadFailed'));
+      }
+    }
+  }
+
+  void _removeImage() {
+    setState(() {
+      _imageBytes = null;
+      _imageChanged = true;
+      _clearImage = true;
+      _imageError = null;
+    });
+  }
+
   void _save() {
     if (!_formKey.currentState!.validate()) return;
     Navigator.pop(
@@ -2366,6 +2554,9 @@ class _ProductDialogState extends State<_ProductDialog> {
           currencyCode: widget.currencyCode,
         )!,
         stockQuantity: int.parse(_stock.text),
+        iconKey: _iconKey,
+        imageBytes: _imageChanged && !_clearImage ? _imageBytes : null,
+        clearImage: _clearImage,
       ),
     );
   }

@@ -12,7 +12,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 9,
+        version: 10,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -28,7 +28,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       inMemoryDatabasePath,
       options: OpenDatabaseOptions(
-        version: 9,
+        version: 10,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -79,6 +79,7 @@ class LedgerDatabase {
     await _createInvoicePaymentsTable(db);
     await _createInvoiceReturnsTable(db);
     await _upgradeProductsToV4(db);
+    await _upgradeProductsToV10(db);
     await _createStockMovementsTable(db);
   }
 
@@ -110,6 +111,9 @@ class LedgerDatabase {
     }
     if (oldVersion < 9) {
       await _upgradeInvoiceReturnsToV9(db);
+    }
+    if (oldVersion < 10) {
+      await _upgradeProductsToV10(db);
     }
   }
 
@@ -272,6 +276,32 @@ class LedgerDatabase {
     );
   }
 
+  static Future<void> _upgradeProductsToV10(Database db) async {
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'products'",
+    );
+    if (tables.isEmpty) return;
+    final columnRows = await db.rawQuery('PRAGMA table_info(products)');
+    final columns = {
+      for (final row in columnRows) row['name']! as String,
+    };
+    if (!columns.contains('icon_key')) {
+      await db.execute("""
+        ALTER TABLE products ADD COLUMN icon_key TEXT NOT NULL DEFAULT 'inventory'
+          CHECK (icon_key IN (
+            'inventory', 'shopping_bag', 'restaurant', 'beverage',
+            'electronics', 'medicine', 'tools', 'book'
+          ))
+      """);
+    }
+    if (!columns.contains('image_bytes')) {
+      await db.execute('''
+        ALTER TABLE products ADD COLUMN image_bytes BLOB
+          CHECK (image_bytes IS NULL OR (length(image_bytes) > 0 AND length(image_bytes) <= 524288))
+      ''');
+    }
+  }
+
   static Future<void> _upgradeProductsToV4(Database db) async {
     final columnRows = await db.rawQuery('PRAGMA table_info(products)');
     final columns = {
@@ -419,6 +449,15 @@ class LedgerDatabase {
         unit_price_cents INTEGER NOT NULL CHECK (unit_price_cents >= 0),
         unit_cost_cents INTEGER NOT NULL DEFAULT 0 CHECK (unit_cost_cents >= 0),
         stock_quantity INTEGER NOT NULL DEFAULT 0 CHECK (stock_quantity >= 0),
+        icon_key TEXT NOT NULL DEFAULT 'inventory' CHECK (
+          icon_key IN (
+            'inventory', 'shopping_bag', 'restaurant', 'beverage',
+            'electronics', 'medicine', 'tools', 'book'
+          )
+        ),
+        image_bytes BLOB CHECK (
+          image_bytes IS NULL OR (length(image_bytes) > 0 AND length(image_bytes) <= 524288)
+        ),
         created_at TEXT NOT NULL
       )
     ''');
