@@ -370,7 +370,10 @@ void main() {
       () => find.byKey(const Key('pos-submit-checkout')).evaluate().isNotEmpty,
     );
 
-    await tester.tap(find.byKey(const Key('pos-add-payment-method')));
+    final addPaymentButton =
+        find.byKey(const Key('pos-add-payment-method'));
+    await tester.ensureVisible(addPaymentButton);
+    await tester.tap(addPaymentButton);
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const Key('pos-payment-amount')),
