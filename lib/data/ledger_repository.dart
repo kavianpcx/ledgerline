@@ -2051,11 +2051,29 @@ class LedgerRepository {
         whereArgs: [normalizedId],
         orderBy: 'id ASC',
       );
-      final paymentRows = await txn.rawQuery(
-        'SELECT COALESCE(SUM(amount_cents), 0) AS paid_cents '
-        'FROM invoice_payments WHERE invoice_id = ?',
-        [normalizedId],
-      );
+      final paymentRows = await txn.rawQuery('''
+        SELECT
+          COALESCE((
+            SELECT SUM(payment.amount_cents)
+            FROM invoice_payments AS payment
+            WHERE payment.invoice_id = ?
+          ), 0)
+          - COALESCE((
+            SELECT SUM(returned.refund_amount_cents)
+            FROM invoice_partial_returns AS returned
+            WHERE returned.invoice_id = ?
+          ), 0)
+          - COALESCE((
+            SELECT SUM(returned.refund_amount_cents)
+            FROM invoice_returns AS returned
+            WHERE returned.invoice_id = ?
+          ), 0) AS paid_cents,
+          COALESCE((
+            SELECT SUM(returned.return_value_cents)
+            FROM invoice_partial_returns AS returned
+            WHERE returned.invoice_id = ?
+          ), 0) AS returned_cents
+      ''', [normalizedId, normalizedId, normalizedId, normalizedId]);
       return InvoicePrintData(
         invoiceNumber: invoice['invoice_number']! as String,
         customerName: invoice['customer_name']! as String,
@@ -2067,6 +2085,7 @@ class LedgerRepository {
         totalCents: invoice['total_cents']! as int,
         paidCents: paymentRows.single['paid_cents']! as int,
         isReturned: invoice['returned_at'] != null,
+        returnedCents: paymentRows.single['returned_cents']! as int,
         lines: lineRows
             .map((row) => InvoicePrintLine(
                   description: row['description']! as String,
