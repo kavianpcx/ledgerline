@@ -12,7 +12,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 6,
+        version: 7,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -28,7 +28,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       inMemoryDatabasePath,
       options: OpenDatabaseOptions(
-        version: 6,
+        version: 7,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -101,6 +101,9 @@ class LedgerDatabase {
     if (oldVersion < 6) {
       await _upgradeInvoicePaymentsToV6(db);
     }
+    if (oldVersion < 7) {
+      await _upgradeInvoicePaymentsToV7(db);
+    }
   }
 
 
@@ -123,6 +126,87 @@ class LedgerDatabase {
         "ALTER TABLE invoice_payments ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'cash' CHECK (payment_method IN ('cash', 'bank_transfer'))",
       );
     }
+  }
+
+  static Future<void> _upgradeInvoicePaymentsToV7(Database db) async {
+    final paymentTables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'invoice_payments'",
+    );
+    if (paymentTables.isEmpty) {
+      final invoiceTables = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sales_invoices'",
+      );
+      if (invoiceTables.isEmpty) return;
+      await _createInvoicePaymentsTable(db);
+    }
+
+    final columns = await db.rawQuery('PRAGMA table_info(invoice_payments)');
+    if (!columns.any((row) => row['name'] == 'journal_entry_id')) {
+      await db.execute(
+        'ALTER TABLE invoice_payments ADD COLUMN journal_entry_id TEXT REFERENCES journal_entries(id) ON DELETE SET NULL',
+      );
+    }
+
+    await db.execute('''
+      UPDATE invoice_payments
+      SET journal_entry_id = id
+      WHERE journal_entry_id IS NULL
+        AND EXISTS (SELECT 1 FROM journal_entries WHERE journal_entries.id = invoice_payments.id)
+    ''');
+
+    final unlinkedPayments = await db.rawQuery('''
+      SELECT p.id, p.payment_date, p.amount_cents, p.payment_method,
+             i.invoice_number, i.customer_name
+      FROM invoice_payments p
+      JOIN sales_invoices i ON i.id = p.invoice_id
+      WHERE p.journal_entry_id IS NULL
+      ORDER BY p.payment_date ASC, p.created_at ASC, p.id ASC
+    ''');
+    for (final payment in unlinkedPayments) {
+      final amountCents = payment['amount_cents']! as int;
+      final paymentDate = payment['payment_date']! as String;
+      final method = payment['payment_method']! as String;
+      final debitAccount = method == 'bank_transfer' ? 'bank' : 'cash';
+      final description = 'Invoice payment ' +
+          (payment['invoice_number']! as String) +
+          ' · ' +
+          (payment['customer_name']! as String);
+      final matches = await db.rawQuery('''
+        SELECT e.id
+        FROM journal_entries e
+        JOIN journal_lines debit_line
+          ON debit_line.entry_id = e.id
+         AND debit_line.account_id = ?
+         AND debit_line.debit_cents = ?
+         AND debit_line.credit_cents = 0
+        JOIN journal_lines credit_line
+          ON credit_line.entry_id = e.id
+         AND credit_line.account_id = 'receivables'
+         AND credit_line.debit_cents = 0
+         AND credit_line.credit_cents = ?
+        WHERE e.entry_date = ?
+          AND e.description = ?
+          AND (SELECT COUNT(*) FROM journal_lines lines WHERE lines.entry_id = e.id) = 2
+          AND NOT EXISTS (
+            SELECT 1 FROM invoice_payments linked
+            WHERE linked.journal_entry_id = e.id
+          )
+        ORDER BY e.created_at ASC, e.id ASC
+        LIMIT 1
+      ''', [debitAccount, amountCents, amountCents, paymentDate, description]);
+      if (matches.isNotEmpty) {
+        await db.update(
+          'invoice_payments',
+          {'journal_entry_id': matches.single['id']! as String},
+          where: 'id = ? AND journal_entry_id IS NULL',
+          whereArgs: [payment['id']],
+        );
+      }
+    }
+
+    await db.execute(
+      'CREATE UNIQUE INDEX IF NOT EXISTS invoice_payments_by_journal_entry ON invoice_payments(journal_entry_id) WHERE journal_entry_id IS NOT NULL',
+    );
   }
 
   static Future<void> _upgradeProductsToV4(Database db) async {
@@ -301,6 +385,7 @@ class LedgerDatabase {
         amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
         payment_method TEXT NOT NULL DEFAULT 'cash'
           CHECK (payment_method IN ('cash', 'bank_transfer')),
+        journal_entry_id TEXT REFERENCES journal_entries(id) ON DELETE SET NULL,
         created_at TEXT NOT NULL
       )
     ''');

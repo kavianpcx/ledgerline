@@ -368,6 +368,16 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         ),
       );
 
+  Future<void> _showInvoicePaymentHistory(SalesInvoice invoice) =>
+      showDialog<void>(
+        context: context,
+        builder: (context) => _InvoicePaymentHistoryDialog(
+          repository: widget.repository,
+          invoice: invoice,
+          currencyCode: widget.settings.currencyCode,
+        ),
+      );
+
   Future<void> _addInvoice(LedgerSnapshot snapshot) async {
     if (!_requireAccountingCurrency()) return;
     if (snapshot.products.isEmpty) {
@@ -1139,18 +1149,28 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
             ),
             trailing: Text(_money(invoice.totalCents, widget.settings.currencyCode), style: const TextStyle(fontWeight: FontWeight.w800)),
           ),
-          if (invoice.status == 'issued' && invoice.balanceDueCents > 0)
-            Align(
-              alignment: AlignmentDirectional.centerEnd,
-              child: Padding(
-                padding: const EdgeInsetsDirectional.only(end: 12, bottom: 8),
-                child: FilledButton.tonalIcon(
-                  onPressed: () => _recordInvoicePayment(invoice),
-                  icon: const Icon(Icons.payments_outlined),
-                  label: Text(tr(context, 'recordPayment')),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(end: 12, bottom: 8),
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                TextButton.icon(
+                  key: ValueKey('invoice-payment-history-' + invoice.number),
+                  onPressed: () => _showInvoicePaymentHistory(invoice),
+                  icon: const Icon(Icons.history_rounded),
+                  label: Text(tr(context, 'paymentHistory')),
                 ),
-              ),
+                if (invoice.status == 'issued' && invoice.balanceDueCents > 0)
+                  FilledButton.tonalIcon(
+                    onPressed: () => _recordInvoicePayment(invoice),
+                    icon: const Icon(Icons.payments_outlined),
+                    label: Text(tr(context, 'recordPayment')),
+                  ),
+              ],
             ),
+          ),
         ],
       ),
     );
@@ -2399,6 +2419,179 @@ class _InvoiceDialogState extends State<_InvoiceDialog> {
   }
 }
 
+class _InvoicePaymentHistoryDialog extends StatefulWidget {
+  const _InvoicePaymentHistoryDialog({
+    required this.repository,
+    required this.invoice,
+    required this.currencyCode,
+  });
+
+  final LedgerRepository repository;
+  final SalesInvoice invoice;
+  final String currencyCode;
+
+  @override
+  State<_InvoicePaymentHistoryDialog> createState() =>
+      _InvoicePaymentHistoryDialogState();
+}
+
+class _InvoicePaymentHistoryDialogState
+    extends State<_InvoicePaymentHistoryDialog> {
+  late final Future<InvoicePaymentHistory?> _history;
+
+  @override
+  void initState() {
+    super.initState();
+    _history =
+        widget.repository.loadInvoicePaymentHistory(widget.invoice.id);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text(tr(context, 'paymentHistoryTitle')),
+        content: SizedBox(
+          width: 520,
+          height: 420,
+          child: FutureBuilder<InvoicePaymentHistory?>(
+            future: _history,
+            builder: (context, result) {
+              if (result.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (result.hasError) {
+                return Center(
+                  child: Text(tr(context, 'paymentHistoryLoadFailed')),
+                );
+              }
+              final history = result.data;
+              if (history == null) {
+                return Center(
+                  child: Text(tr(context, 'paymentHistoryLoadFailed')),
+                );
+              }
+              return SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      history.invoiceNumber + ' · ' + history.customerName,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      tr(context, 'total') +
+                          ': ' +
+                          _money(
+                            history.invoiceTotalCents,
+                            widget.currencyCode,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      tr(context, 'paidAmount') +
+                          ': ' +
+                          _money(history.recordedCents, widget.currencyCode),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      tr(context, 'balanceDue') +
+                          ': ' +
+                          _money(
+                            history.balanceDueCents,
+                            widget.currencyCode,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: (history.isReconciled
+                                ? Theme.of(context).colorScheme.primaryContainer
+                                : Theme.of(context).colorScheme.errorContainer)
+                            .withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        tr(
+                          context,
+                          history.isReconciled
+                              ? 'invoicePaymentsReconciled'
+                              : 'invoicePaymentsNeedReview',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (history.payments.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 20),
+                        child: Center(
+                          child: Text(tr(context, 'noPaymentsRecorded')),
+                        ),
+                      )
+                    else
+                      for (final payment in history.payments) ...[
+                        const Divider(height: 1),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            _money(
+                              payment.amountCents,
+                              widget.currencyCode,
+                            ),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          subtitle: Text(
+                            _shortDate(context, payment.paymentDate) +
+                                ' · ' +
+                                (payment.paymentMethod == 'bank_transfer'
+                                    ? tr(context, 'posPaymentBankTransfer')
+                                    : tr(context, 'posPaymentCash')),
+                          ),
+                          trailing: Tooltip(
+                            message: tr(
+                              context,
+                              payment.ledgerPostingMatches
+                                  ? 'paymentJournalMatched'
+                                  : 'paymentJournalMissing',
+                            ),
+                            child: Icon(
+                              payment.ledgerPostingMatches
+                                  ? Icons.check_circle_outline_rounded
+                                  : Icons.warning_amber_rounded,
+                              color: payment.ledgerPostingMatches
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text(
+                            tr(
+                              context,
+                              payment.ledgerPostingMatches
+                                  ? 'paymentJournalMatched'
+                                  : 'paymentJournalMissing',
+                            ),
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(tr(context, 'stockHistoryClose')),
+          ),
+        ],
+      );
+}
+
 class _InvoicePaymentDialog extends StatefulWidget {
   const _InvoicePaymentDialog({
     required this.invoice,
@@ -2416,6 +2609,7 @@ class _InvoicePaymentDialogState extends State<_InvoicePaymentDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _amount;
   DateTime _paymentDate = DateTime.now();
+  String _paymentMethod = 'cash';
 
   @override
   void initState() {
@@ -2471,6 +2665,28 @@ class _InvoicePaymentDialogState extends State<_InvoicePaymentDialog> {
                   },
                 ),
                 const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  initialValue: _paymentMethod,
+                  decoration: InputDecoration(
+                    labelText: tr(context, 'posPaymentMethod'),
+                  ),
+                  items: [
+                    DropdownMenuItem(
+                      value: 'cash',
+                      child: Text(tr(context, 'posPaymentCash')),
+                    ),
+                    DropdownMenuItem(
+                      value: 'bank_transfer',
+                      child: Text(tr(context, 'posPaymentBankTransfer')),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => _paymentMethod = value);
+                    }
+                  },
+                ),
+                const SizedBox(height: 8),
                 TextButton.icon(
                   onPressed: () async {
                     final selected = await showDatePicker(
@@ -2514,6 +2730,7 @@ class _InvoicePaymentDialogState extends State<_InvoicePaymentDialog> {
         invoiceId: widget.invoice.id,
         amountCents: _EntryDialogState._parseCents(_amount.text, currencyCode: widget.currencyCode)!,
         date: _paymentDate,
+        paymentMethod: _paymentMethod,
       ),
     );
   }

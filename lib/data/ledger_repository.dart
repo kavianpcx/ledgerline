@@ -866,14 +866,6 @@ class LedgerRepository {
         final paymentId = index == 0
             ? 'pos_payment_' + invoiceId
             : 'pos_payment_' + invoiceId + '_' + index.toString();
-        await txn.insert('invoice_payments', {
-          'id': paymentId,
-          'invoice_id': invoiceId,
-          'payment_date': _dateOnly(draft.date),
-          'amount_cents': payment.amountCents,
-          'payment_method': payment.paymentMethod,
-          'created_at': createdAt,
-        });
         await _insertTwoLineJournalEntry(
           txn,
           entryId: paymentId,
@@ -884,6 +876,15 @@ class LedgerRepository {
           creditAccountId: 'receivables',
           amountCents: payment.amountCents,
         );
+        await txn.insert('invoice_payments', {
+          'id': paymentId,
+          'invoice_id': invoiceId,
+          'payment_date': _dateOnly(draft.date),
+          'amount_cents': payment.amountCents,
+          'payment_method': payment.paymentMethod,
+          'journal_entry_id': paymentId,
+          'created_at': createdAt,
+        });
       }
     });
   }
@@ -927,26 +928,30 @@ class LedgerRepository {
       }
 
       final newPaidCents = alreadyPaidCents + draft.amountCents;
+      final paymentId = 'payment_' + draft.invoiceId + '_' + newPaidCents.toString();
       final createdAt = DateTime.now().toUtc().toIso8601String();
+      await _insertTwoLineJournalEntry(
+        txn,
+        entryId: paymentId,
+        date: draft.date,
+        description: 'Invoice payment ' +
+            (invoice['invoice_number']! as String) +
+            ' · ' +
+            (invoice['customer_name']! as String),
+        debitAccountId:
+            draft.paymentMethod == 'bank_transfer' ? 'bank' : 'cash',
+        creditAccountId: 'receivables',
+        amountCents: draft.amountCents,
+      );
       await txn.insert('invoice_payments', {
-        'id': 'payment_${draft.invoiceId}_$newPaidCents',
+        'id': paymentId,
         'invoice_id': draft.invoiceId,
         'payment_date': _dateOnly(draft.date),
         'amount_cents': draft.amountCents,
         'payment_method': draft.paymentMethod,
+        'journal_entry_id': paymentId,
         'created_at': createdAt,
       });
-      await _insertBalancedEntry(
-        txn,
-        JournalDraft(
-          date: draft.date,
-          description: 'Invoice payment ${invoice['invoice_number']} · ${invoice['customer_name']}',
-          amountCents: draft.amountCents,
-          debitAccountId:
-              draft.paymentMethod == 'bank_transfer' ? 'bank' : 'cash',
-          creditAccountId: 'receivables',
-        ),
-      );
       final updated = await txn.update(
         'sales_invoices',
         {'status': newPaidCents == totalCents ? 'paid' : 'issued'},
@@ -959,6 +964,107 @@ class LedgerRepository {
     });
   }
 
+
+  Future<InvoicePaymentHistory?> loadInvoicePaymentHistory(
+    String invoiceId,
+  ) async {
+    if (invoiceId.trim().isEmpty) {
+      throw ArgumentError.value(invoiceId, 'invoiceId');
+    }
+    return _database.handle.transaction((txn) async {
+      final invoiceRows = await txn.query(
+        'sales_invoices',
+        columns: [
+          'id',
+          'invoice_number',
+          'customer_name',
+          'status',
+          'total_cents',
+        ],
+        where: 'id = ?',
+        whereArgs: [invoiceId],
+        limit: 1,
+      );
+      if (invoiceRows.isEmpty) return null;
+      final invoice = invoiceRows.single;
+      final paymentRows = await txn.query(
+        'invoice_payments',
+        where: 'invoice_id = ?',
+        whereArgs: [invoiceId],
+        orderBy: 'payment_date ASC, created_at ASC, id ASC',
+      );
+      final payments = <InvoicePaymentRecord>[];
+      for (final row in paymentRows) {
+        payments.add(InvoicePaymentRecord(
+          id: row['id']! as String,
+          invoiceId: row['invoice_id']! as String,
+          paymentDate: DateTime.parse(row['payment_date']! as String),
+          amountCents: row['amount_cents']! as int,
+          paymentMethod: row['payment_method']! as String,
+          journalEntryId: row['journal_entry_id'] as String?,
+          ledgerPostingMatches: await _paymentJournalPostingMatches(txn, row),
+        ));
+      }
+      return InvoicePaymentHistory(
+        invoiceId: invoice['id']! as String,
+        invoiceNumber: invoice['invoice_number']! as String,
+        customerName: invoice['customer_name']! as String,
+        invoiceStatus: invoice['status']! as String,
+        invoiceTotalCents: invoice['total_cents']! as int,
+        payments: payments,
+      );
+    });
+  }
+
+  Future<bool> _paymentJournalPostingMatches(
+    DatabaseExecutor executor,
+    Map<String, Object?> payment,
+  ) async {
+    final journalEntryId = payment['journal_entry_id'] as String?;
+    if (journalEntryId == null || journalEntryId.isEmpty) return false;
+    final entryRows = await executor.query(
+      'journal_entries',
+      columns: ['entry_date'],
+      where: 'id = ?',
+      whereArgs: [journalEntryId],
+      limit: 1,
+    );
+    if (entryRows.isEmpty ||
+        entryRows.single['entry_date'] != payment['payment_date']) {
+      return false;
+    }
+
+    final amountCents = payment['amount_cents']! as int;
+    final paymentMethod = payment['payment_method']! as String;
+    final expectedCashAccount =
+        paymentMethod == 'bank_transfer' ? 'bank' : 'cash';
+    final lines = await executor.query(
+      'journal_lines',
+      where: 'entry_id = ?',
+      whereArgs: [journalEntryId],
+    );
+    if (lines.length != 2) return false;
+
+    var debitMatches = false;
+    var receivableMatches = false;
+    for (final line in lines) {
+      final accountId = line['account_id']! as String;
+      final debitCents = line['debit_cents']! as int;
+      final creditCents = line['credit_cents']! as int;
+      if (accountId == expectedCashAccount &&
+          debitCents == amountCents &&
+          creditCents == 0) {
+        debitMatches = true;
+      } else if (accountId == 'receivables' &&
+          debitCents == 0 &&
+          creditCents == amountCents) {
+        receivableMatches = true;
+      } else {
+        return false;
+      }
+    }
+    return debitMatches && receivableMatches;
+  }
 
   Future<AppSettings> loadAppSettings() async {
     final rows = await _database.handle.query('app_settings');
