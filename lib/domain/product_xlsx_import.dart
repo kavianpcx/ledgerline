@@ -62,7 +62,7 @@ class ProductXlsxImport {
       throw const FormatException('The worksheet needs a header and at least one product row.');
     }
     return rows
-        .map((row) => row.map(_encodeCsvField).join(','))
+        .join('\\r\\n');
         .join('\\r\\n');
   }
 
