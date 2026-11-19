@@ -168,6 +168,15 @@ jobs:
             [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr handle);
             [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr handle);
             [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr handle);
+            [StructLayout(LayoutKind.Sequential)] public struct WindowRect {
+              public int Left; public int Top; public int Right; public int Bottom;
+            }
+            [DllImport("user32.dll", SetLastError = true)] public static extern bool GetWindowRect(IntPtr handle, out WindowRect rectangle);
+            public static int[] GetWindowBounds(IntPtr handle) {
+              WindowRect rectangle;
+              if (!GetWindowRect(handle, out rectangle)) return null;
+              return new int[] { rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top };
+            }
             [DllImport("user32.dll", SetLastError = true)] public static extern bool MoveWindow(IntPtr handle, int x, int y, int width, int height, bool repaint);
             [StructLayout(LayoutKind.Sequential)] public struct Input {
               public uint type;
@@ -200,6 +209,123 @@ jobs:
             }
           }
           "@
+          $evidenceDirectory = Join-Path $PWD 'ui-evidence'
+          New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
+          $releaseOcrDirectory = Join-Path $PWD 'build/windows/x64/runner/Release/ocr'
+          $tesseractPath = Join-Path $releaseOcrDirectory 'tesseract.exe'
+          $tessdataDirectory = Join-Path $releaseOcrDirectory 'tessdata'
+          if (-not (Test-Path -LiteralPath $tesseractPath)) { throw 'The bundled Tesseract executable is missing from the Windows release build.' }
+          foreach ($languageModel in @('eng', 'fas')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $tessdataDirectory ($languageModel + '.traineddata')))) {
+              throw "The bundled $languageModel OCR model is missing."
+            }
+          }
+          $evidenceReport = Join-Path $evidenceDirectory 'capture-verification.txt'
+          Set-Content -Path $evidenceReport -Value ('commit=' + $env:GITHUB_SHA) -Encoding utf8
+          $script:uiVerificationFailures = [System.Collections.Generic.List[string]]::new()
+
+          function Assert-VisibleUiText {
+            param([string]$ImagePath, [string]$Scenario)
+            $language = if ($Scenario -eq 'settings-fa') { 'fas+eng' } else { 'eng+fas' }
+            $recognized = (& $tesseractPath $ImagePath stdout --tessdata-dir $tessdataDirectory -l $language --psm 11 2>&1) -join [Environment]::NewLine
+            if ($LASTEXITCODE -ne 0) { throw "Tesseract could not inspect $Scenario. Output: $recognized" }
+            $expected = @(
+              switch ($Scenario) {
+                'titlebar' { 'Your books'; 'Total assets' }
+                'windows-sidebar-wide' { 'Products'; 'Your books' }
+                'windows-sidebar-medium' { 'Your books'; 'Total assets' }
+                'windows-sidebar-narrow' { 'Your books'; 'Total assets' }
+                'settings-light' { 'Settings'; 'General' }
+                'settings-dark' { 'Settings'; 'Appearance'; 'Dark mode' }
+                'settings-fa' { }
+                'currency-popup' { 'Settings'; 'Search currencies'; 'US Dollar' }
+                'installer-launch' { 'Your books'; 'Total assets' }
+                default { throw "No visible-text expectations are defined for $Scenario." }
+              }
+            )
+            foreach ($expectedText in $expected) {
+              if ($recognized -notmatch [Regex]::Escape($expectedText)) {
+                throw "Visible text '$expectedText' was missing from $Scenario. OCR output: $recognized"
+              }
+            }
+            if ($Scenario -eq 'settings-fa' -and $recognized -notmatch 'زبان|منطقه') {
+              throw "Persian settings labels were missing from $Scenario. OCR output: $recognized"
+            }
+            if ($Scenario -eq 'titlebar') {
+              $titleImage = [System.Drawing.Bitmap]::new($ImagePath)
+              $scaledTitle = $null
+              $titleGraphics = $null
+              try {
+                $titleHeight = [Math]::Min(100, $titleImage.Height)
+                $scaleFactor = 3
+                $scaledTitle = [System.Drawing.Bitmap]::new($titleImage.Width * $scaleFactor, $titleHeight * $scaleFactor)
+                $titleGraphics = [System.Drawing.Graphics]::FromImage($scaledTitle)
+                $titleGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                $titleGraphics.DrawImage(
+                  $titleImage,
+                  [System.Drawing.Rectangle]::new(0, 0, $scaledTitle.Width, $scaledTitle.Height),
+                  [System.Drawing.Rectangle]::new(0, 0, $titleImage.Width, $titleHeight),
+                  [System.Drawing.GraphicsUnit]::Pixel
+                )
+                $titleImagePath = Join-Path $env:RUNNER_TEMP 'ledgerline-titlebar-upscaled.png'
+                $scaledTitle.Save($titleImagePath, [System.Drawing.Imaging.ImageFormat]::Png)
+              } finally {
+                if ($null -ne $titleGraphics) { $titleGraphics.Dispose() }
+                if ($null -ne $scaledTitle) { $scaledTitle.Dispose() }
+                $titleImage.Dispose()
+              }
+              $titleText = (& $tesseractPath $titleImagePath stdout --tessdata-dir $tessdataDirectory -l eng --psm 6 2>&1) -join [Environment]::NewLine
+              if ($LASTEXITCODE -ne 0 -or $titleText -notmatch 'Ledgerline') {
+                throw "Ledgerline title text was missing from the upscaled $Scenario title strip. OCR output: $titleText"
+              }
+              Add-Content -Path $evidenceReport -Value ("titlebar=" + $Scenario + "; recognized=" + ($titleText -replace '[\r\n]+', ' ')) -Encoding utf8
+              Write-Host ("Verified titlebar text in " + $Scenario + ": " + ($titleText -replace '[\r\n]+', ' '))
+            }
+            Add-Content -Path $evidenceReport -Value ("scenario=" + $Scenario + "; expected=" + ($expected -join '|') + "; recognized=" + ($recognized -replace '[\r\n]+', ' ')) -Encoding utf8
+            Write-Host ("Verified visible text in " + $Scenario + ": " + ($recognized -replace '[\r\n]+', ' '))
+          }
+
+          function Save-WindowEvidence {
+            param([IntPtr]$WindowHandle, [string]$ImagePath, [string]$Scenario)
+            $windowBounds = [LedgerlineWindowTest]::GetWindowBounds($WindowHandle)
+            if ($null -eq $windowBounds) { throw "Could not read the window bounds for $Scenario." }
+            $screenBounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $left = [Math]::Max([int]$windowBounds[0], [int]$screenBounds.Left)
+            $top = [Math]::Max([int]$windowBounds[1], [int]$screenBounds.Top)
+            $right = [Math]::Min(([int]$windowBounds[0] + [int]$windowBounds[2]), [int]$screenBounds.Right)
+            $bottom = [Math]::Min(([int]$windowBounds[1] + [int]$windowBounds[3]), [int]$screenBounds.Bottom)
+            $width = $right - $left
+            $height = $bottom - $top
+            if ($width -lt 480 -or $height -lt 300) { throw "The visible $Scenario window area is too small to verify." }
+            $attemptPath = Join-Path $env:RUNNER_TEMP ('ledgerline-' + $Scenario + '-screen.png')
+            $lastVerificationError = $null
+            for ($attempt = 1; $attempt -le 15; $attempt++) {
+              $bitmap = [System.Drawing.Bitmap]::new($width, $height)
+              $graphics = $null
+              try {
+                $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+                $graphics.CopyFromScreen([System.Drawing.Point]::new($left, $top), [System.Drawing.Point]::Empty, [System.Drawing.Size]::new($width, $height))
+                $bitmap.Save($attemptPath, [System.Drawing.Imaging.ImageFormat]::Png)
+              } finally {
+                if ($null -ne $graphics) { $graphics.Dispose() }
+                $bitmap.Dispose()
+              }
+              try {
+                Assert-VisibleUiText -ImagePath $attemptPath -Scenario $Scenario
+                Move-Item -LiteralPath $attemptPath -Destination $ImagePath -Force | Out-Null
+                return
+              } catch {
+                $lastVerificationError = $_.Exception
+                if ($attempt -lt 15) {
+                  Write-Host ("Waiting for rendered UI in " + $Scenario + " (attempt " + $attempt + " of 15).")
+                  Start-Sleep -Seconds 1
+                }
+              }
+            }
+            Move-Item -LiteralPath $attemptPath -Destination $ImagePath -Force | Out-Null
+            throw $lastVerificationError.Message
+          }
+
           $smokeInstallDirectory = Join-Path $env:RUNNER_TEMP 'LedgerlineInstallerSmoke'
           $installerPath = Join-Path $PWD 'installer/output/ledgerline-windows-setup.exe'
           $setup = Start-Process -FilePath $installerPath -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$smokeInstallDirectory") -Wait -PassThru
@@ -211,23 +337,28 @@ jobs:
             Start-Sleep -Seconds 1
             $smokeProcess.Refresh()
             if ($smokeProcess.HasExited) { throw 'Installed Ledgerline exited during smoke-test startup.' }
-            if ($smokeProcess.MainWindowHandle -ne [IntPtr]::Zero) { break }
+            if ($smokeProcess.MainWindowHandle -ne [IntPtr]::Zero -and [LedgerlineWindowTest]::IsWindowVisible($smokeProcess.MainWindowHandle)) { break }
           }
           $smokeProcess.Refresh()
-          if ($smokeProcess.MainWindowHandle -eq [IntPtr]::Zero) { throw 'Installed Ledgerline did not create a Windows application window.' }
+          if ($smokeProcess.MainWindowHandle -eq [IntPtr]::Zero -or -not [LedgerlineWindowTest]::IsWindowVisible($smokeProcess.MainWindowHandle)) {
+            throw 'Installed Ledgerline did not create a visible Windows application window.'
+          }
           [LedgerlineWindowTest]::SetForegroundWindow($smokeProcess.MainWindowHandle) | Out-Null
-          Start-Sleep -Seconds 2
+          Start-Sleep -Seconds 3
+          if ([LedgerlineWindowTest]::GetForegroundWindow() -ne $smokeProcess.MainWindowHandle) { throw 'Installed Ledgerline was not the foreground window for its launch evidence.' }
+          $installedImage = Join-Path $evidenceDirectory 'installer-launch.png'
+          Save-WindowEvidence -WindowHandle $smokeProcess.MainWindowHandle -ImagePath $installedImage -Scenario 'installer-launch'
+          $installedHash = (Get-FileHash -LiteralPath $installedApplication -Algorithm SHA256).Hash
+          Add-Content -Path $evidenceReport -Value ('installed_exe_sha256=' + $installedHash) -Encoding utf8
           $smokeProcess.CloseMainWindow() | Out-Null
           if (-not $smokeProcess.WaitForExit(10000)) { throw 'Installed Ledgerline did not close cleanly after the smoke test.' }
           $smokeProcess.Dispose()
-          $evidenceDirectory = Join-Path $PWD 'ui-evidence'
-          New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
           $scenarios = @('titlebar', 'windows-sidebar-wide', 'windows-sidebar-medium', 'windows-sidebar-narrow', 'settings-light', 'settings-dark', 'settings-fa', 'currency-popup')
           foreach ($scenario in $scenarios) {
             Write-Host "Building visual scenario: $scenario"
-            & flutter build windows --debug "--dart-define=LEDGERLINE_VISUAL_SCENARIO=$scenario"
+            & flutter build windows --release "--dart-define=LEDGERLINE_VISUAL_SCENARIO=$scenario"
             if ($LASTEXITCODE -ne 0) { throw "Windows debug build failed for scenario $scenario." }
-            $applicationPath = Join-Path $PWD 'build/windows/x64/runner/Debug/ledgerline.exe'
+            $applicationPath = Join-Path $PWD 'build/windows/x64/runner/Release/ledgerline.exe'
             if (-not (Test-Path -LiteralPath $applicationPath)) { throw 'Debug application executable was not produced.' }
             $process = Start-Process -FilePath $applicationPath -PassThru
             for ($attempt = 0; $attempt -lt 30; $attempt++) {
@@ -247,23 +378,6 @@ jobs:
             if (-not [LedgerlineWindowTest]::IsWindowVisible($process.MainWindowHandle)) { throw "Ledgerline window was not shown for $scenario." }
             Start-Sleep -Seconds 2
             [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
-            if ($scenario -eq 'titlebar') {
-              [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
-              Start-Sleep -Milliseconds 500
-              if ([LedgerlineWindowTest]::GetForegroundWindow() -ne $process.MainWindowHandle) { throw 'Could not activate Ledgerline for keyboard shortcut verification.' }
-              if (-not [LedgerlineWindowTest]::SendChord(0x46)) { throw 'Windows did not accept the Ctrl+Shift+F key input.' }
-              Start-Sleep -Seconds 1
-              if (-not [LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { throw 'Ctrl+Shift+F did not maximize the Ledgerline window.' }
-              if (-not [LedgerlineWindowTest]::SendChord(0x46)) { throw 'Windows did not accept the Ctrl+Shift+F restore input.' }
-              Start-Sleep -Seconds 1
-              if ([LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { throw 'Ctrl+Shift+F did not restore the Ledgerline window.' }
-              if (-not [LedgerlineWindowTest]::SendChord(0x4D)) { throw 'Windows did not accept the Ctrl+Shift+M key input.' }
-              Start-Sleep -Seconds 1
-              if (-not [LedgerlineWindowTest]::IsIconic($process.MainWindowHandle)) { throw 'Ctrl+Shift+M did not minimize the Ledgerline window.' }
-              [LedgerlineWindowTest]::ShowWindow($process.MainWindowHandle, 9) | Out-Null
-              Start-Sleep -Seconds 1
-              if ([LedgerlineWindowTest]::IsIconic($process.MainWindowHandle)) { throw 'The Ledgerline window did not restore after minimizing.' }
-            }
             if ($scenario -like 'windows-sidebar-*') {
               [LedgerlineWindowTest]::ShowWindow($process.MainWindowHandle, 9) | Out-Null
               $windowWidth = switch ($scenario) {
@@ -289,28 +403,126 @@ jobs:
             }
             [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
             Start-Sleep -Seconds 3
-            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-            $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
-            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-            $bitmap.Save((Join-Path $evidenceDirectory ($scenario + '.png')), [System.Drawing.Imaging.ImageFormat]::Png)
-            $graphics.Dispose()
-            $bitmap.Dispose()
+            if ([LedgerlineWindowTest]::GetForegroundWindow() -ne $process.MainWindowHandle) { throw "$scenario was not the foreground window when its screenshot was captured." }
+            $imagePath = Join-Path $evidenceDirectory ($scenario + '.png')
+            try {
+              Save-WindowEvidence -WindowHandle $process.MainWindowHandle -ImagePath $imagePath -Scenario $scenario
+            } catch {
+              $verificationError = $scenario + ': ' + $_.Exception.Message
+              $script:uiVerificationFailures.Add($verificationError)
+              Add-Content -Path $evidenceReport -Value ('verification_error=' + $verificationError) -Encoding utf8
+              Write-Host ('UI_TEXT_ASSERTION_FAILED ' + $verificationError)
+            }
+            if ($scenario -eq 'titlebar') {
+              try {
+                if ([LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) {
+                  [LedgerlineWindowTest]::ShowWindow($process.MainWindowHandle, 9) | Out-Null
+                  for ($attempt = 0; $attempt -lt 20; $attempt++) {
+                    if (-not [LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { break }
+                    Start-Sleep -Milliseconds 100
+                  }
+                }
+                if ([LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { throw 'Could not restore the titlebar window before testing Ctrl+Shift+F.' }
+                [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
+                Start-Sleep -Milliseconds 500
+                if ([LedgerlineWindowTest]::GetForegroundWindow() -ne $process.MainWindowHandle) { throw 'Could not activate Ledgerline for keyboard shortcut verification.' }
+                if (-not [LedgerlineWindowTest]::SendChord(0x46)) { throw 'Windows did not accept the Ctrl+Shift+F key input.' }
+                Start-Sleep -Seconds 1
+                if (-not [LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { throw 'Ctrl+Shift+F did not maximize the Ledgerline window.' }
+                if (-not [LedgerlineWindowTest]::SendChord(0x46)) { throw 'Windows did not accept the Ctrl+Shift+F restore input.' }
+                Start-Sleep -Seconds 1
+                if ([LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { throw 'Ctrl+Shift+F did not restore the Ledgerline window.' }
+                if (-not [LedgerlineWindowTest]::SendChord(0x4D)) { throw 'Windows did not accept the Ctrl+Shift+M key input.' }
+                Start-Sleep -Seconds 1
+                if (-not [LedgerlineWindowTest]::IsIconic($process.MainWindowHandle)) { throw 'Ctrl+Shift+M did not minimize the Ledgerline window.' }
+                [LedgerlineWindowTest]::ShowWindow($process.MainWindowHandle, 9) | Out-Null
+                Start-Sleep -Seconds 1
+                if ([LedgerlineWindowTest]::IsIconic($process.MainWindowHandle)) { throw 'The Ledgerline window did not restore after minimizing.' }
+              } catch {
+                $verificationError = 'titlebar keyboard shortcuts: ' + $_.Exception.Message
+                $script:uiVerificationFailures.Add($verificationError)
+                Add-Content -Path $evidenceReport -Value ('verification_error=' + $verificationError) -Encoding utf8
+                Write-Host ('UI_TEXT_ASSERTION_FAILED ' + $verificationError)
+              }
+            }
             $process.CloseMainWindow() | Out-Null
             if (-not $process.WaitForExit(10000)) { throw "Ledgerline did not close cleanly after capturing $scenario." }
             $process.Dispose()
           }
+          $previewFiles = @(Get-ChildItem -LiteralPath $evidenceDirectory -Filter '*.png' | Sort-Object Name)
+          if ($previewFiles.Count -gt 0) {
+            $columns = 3
+            $cellWidth = 480
+            $cellHeight = 300
+            $rows = [Math]::Ceiling($previewFiles.Count / [double]$columns)
+            $contactSheet = [System.Drawing.Bitmap]::new($columns * $cellWidth, [int]($rows * $cellHeight))
+            $sheetGraphics = [System.Drawing.Graphics]::FromImage($contactSheet)
+            $labelFont = [System.Drawing.Font]::new('Arial', 12, [System.Drawing.FontStyle]::Bold)
+            try {
+              $sheetGraphics.Clear([System.Drawing.Color]::White)
+              foreach ($index in 0..($previewFiles.Count - 1)) {
+                $previewImage = [System.Drawing.Bitmap]::new($previewFiles[$index].FullName)
+                try {
+                  $column = $index % $columns
+                  $row = [Math]::Floor($index / [double]$columns)
+                  $cellX = $column * $cellWidth
+                  $cellY = $row * $cellHeight
+                  $sheetGraphics.DrawString($previewFiles[$index].BaseName, $labelFont, [System.Drawing.Brushes]::Black, [float]($cellX + 8), [float]($cellY + 5))
+                  $maxWidth = $cellWidth - 20
+                  $maxHeight = $cellHeight - 42
+                  $scale = [Math]::Min($maxWidth / [double]$previewImage.Width, $maxHeight / [double]$previewImage.Height)
+                  $targetWidth = [int][Math]::Round($previewImage.Width * $scale)
+                  $targetHeight = [int][Math]::Round($previewImage.Height * $scale)
+                  $targetX = $cellX + [int](($cellWidth - $targetWidth) / 2)
+                  $targetY = $cellY + 30 + [int](($maxHeight - $targetHeight) / 2)
+                  $sheetGraphics.DrawImage($previewImage, $targetX, $targetY, $targetWidth, $targetHeight)
+                } finally {
+                  $previewImage.Dispose()
+                }
+              }
+              $contactPath = Join-Path $evidenceDirectory 'contact-sheet.jpg'
+              $jpegCodec = @([System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' })[0]
+              if ($null -eq $jpegCodec) { throw 'The JPEG encoder is unavailable for the UI evidence contact sheet.' }
+              $encoderParameters = [System.Drawing.Imaging.EncoderParameters]::new(1)
+              $encoderParameters.Param[0] = [System.Drawing.Imaging.EncoderParameter]::new([System.Drawing.Imaging.Encoder]::Quality, [long]65)
+              try {
+                $contactSheet.Save($contactPath, $jpegCodec, $encoderParameters)
+              } finally {
+                $encoderParameters.Dispose()
+              }
+            } finally {
+              $labelFont.Dispose()
+              $sheetGraphics.Dispose()
+              $contactSheet.Dispose()
+            }
+            $previewBase64 = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($contactPath))
+            Write-Host 'UI_EVIDENCE_PREVIEW_BEGIN'
+            for ($offset = 0; $offset -lt $previewBase64.Length; $offset += 30000) {
+              $chunkLength = [Math]::Min(30000, $previewBase64.Length - $offset)
+              Write-Host ('UI_EVIDENCE_PREVIEW_CHUNK:' + $previewBase64.Substring($offset, $chunkLength))
+            }
+            Write-Host 'UI_EVIDENCE_PREVIEW_END'
+          }
+
+          if ($script:uiVerificationFailures.Count -gt 0) {
+            throw ('Visible text verification failed for ' + $script:uiVerificationFailures.Count + ' screen(s): ' + ($script:uiVerificationFailures -join ' || '))
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: ledgerline-windows-installer
           path: installer/output/ledgerline-windows-setup.exe
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - name: Upload UI evidence, including failed captures
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: ledgerline-ui-evidence
-          path: ui-evidence/*.png
-          if-no-files-found: error
+          path: ui-evidence/*
+          if-no-files-found: warn
 
+  # Public publishing intentionally requires an explicit marker on a main-branch push.
+  # Pull requests, feature branches, and manual builds only produce reviewable artifacts.
   publish-release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release]')
     needs: [analyze, test, windows]
