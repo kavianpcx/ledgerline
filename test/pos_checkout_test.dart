@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -94,6 +95,70 @@ Future<void> _mountPos(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('F2 focuses the POS product search', (tester) async {
+    final repository = await _createWidgetRepository(
+      tester,
+      products: const [_coffee],
+    );
+    addTearDown(() async {
+      await tester.runAsync(repository.close);
+    });
+
+    await _mountPos(
+      tester,
+      repository,
+      const {},
+      onCompleted: () async {},
+      onCartChanged: (_) {},
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.f2);
+    await tester.pump();
+
+    final search = tester.widget<TextField>(
+      find.byKey(const Key('pos-product-search')),
+    );
+    expect(search.focusNode?.hasFocus, isTrue);
+  });
+
+  testWidgets('F4 opens checkout review only for a valid cart', (tester) async {
+    final repository = await _createWidgetRepository(
+      tester,
+      products: const [_coffee],
+    );
+    addTearDown(() async {
+      await tester.runAsync(repository.close);
+    });
+
+    await _mountPos(
+      tester,
+      repository,
+      const {},
+      onCompleted: () async {},
+      onCartChanged: (_) {},
+    );
+    await _pumpUntil(
+      tester,
+      () => find.byKey(const ValueKey('pos-product-COF-01')).evaluate().isNotEmpty,
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.f4);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('pos-submit-checkout')), findsNothing);
+    expect(repository.invoiceDrafts, isEmpty);
+
+    await tester.tap(find.byKey(const ValueKey('pos-product-COF-01')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.f4);
+    await _pumpUntil(
+      tester,
+      () => find.byKey(const Key('pos-submit-checkout')).evaluate().isNotEmpty,
+    );
+
+    expect(repository.invoiceDrafts, isEmpty);
+    expect(find.byKey(const Key('pos-submit-checkout')), findsOneWidget);
+  });
 
   test('barcode lookup trims input and requires the complete code', () async {
     final repository = await _createRepository();
