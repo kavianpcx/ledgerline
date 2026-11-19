@@ -1,8 +1,10 @@
+import 'package:excel/excel.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ledgerline/data/ledger_database.dart';
 import 'package:ledgerline/data/ledger_repository.dart';
 import 'package:ledgerline/domain/product.dart';
 import 'package:ledgerline/domain/product_csv_import.dart';
+import 'package:ledgerline/domain/product_xlsx_import.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -80,6 +82,51 @@ void main() {
     expect(result.validCount, 10000);
     expect(result.rows.length, 10000);
     expect(result.validDrafts.last.sku, 'SKU-9999');
+  });
+
+  test('converts a populated XLSX worksheet into the reviewed product importer', () {
+    final workbook = Excel.createExcel();
+    final sheet = workbook['Catalog'];
+    void cell(String address, CellValue value) {
+      sheet.cell(CellIndex.indexByString(address)).value = value;
+    }
+
+    cell('A1', TextCellValue('SKU'));
+    cell('B1', TextCellValue('Product Name'));
+    cell('C1', TextCellValue('Selling Price'));
+    cell('D1', TextCellValue('Unit Cost'));
+    cell('E1', TextCellValue('Stock Quantity'));
+    cell('F1', TextCellValue('Category'));
+    cell('G1', TextCellValue('Barcode'));
+    cell('A2', TextCellValue('TEA-1'));
+    cell('B2', TextCellValue('چای, سبز'));
+    cell('C2', DoubleCellValue(12.34));
+    cell('D2', DoubleCellValue(6.1));
+    cell('E2', IntCellValue(5));
+    cell('F2', TextCellValue('نوشیدنی'));
+    cell('G2', TextCellValue('0012345678905'));
+
+    final bytes = workbook.save();
+    expect(bytes, isNotNull);
+    final csv = ProductXlsxImport.toCsv(bytes!);
+    final result = ProductCsvImport.parse(csv, currencyCode: 'USD');
+
+    expect(result.validCount, 1);
+    final draft = result.validDrafts.single;
+    expect(draft.sku, 'TEA-1');
+    expect(draft.name, 'چای, سبز');
+    expect(draft.unitPriceCents, 1234);
+    expect(draft.unitCostCents, 610);
+    expect(draft.stockQuantity, 5);
+    expect(draft.category, 'نوشیدنی');
+    expect(draft.barcode, '0012345678905');
+  });
+
+  test('rejects unreadable XLSX bytes and empty workbooks', () {
+    expect(() => ProductXlsxImport.toCsv([1, 2, 3]), throwsFormatException);
+    final bytes = Excel.createExcel().save();
+    expect(bytes, isNotNull);
+    expect(() => ProductXlsxImport.toCsv(bytes!), throwsFormatException);
   });
 
   test('imports products and opening inventory atomically with balanced journals', () async {

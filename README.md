@@ -20,13 +20,13 @@ PR [#2](https://github.com/kavianpcx/ledgerline/pull/2) restored permanent left-
 
 ## Current source and development work
 
-PRs #3 through #12 are merged into `main`. PR #12's merge commit is `76c7ef26b392fe25e9996f7a96d9350d34f04136`; [PR workflow run 44460386249](https://github.com/kavianpcx/ledgerline/actions/runs/44460386249) and post-merge [run 44462022534](https://github.com/kavianpcx/ledgerline/actions/runs/44462022534) passed analysis, all ten test suites, the Windows release build, installer packaging, smoke-install/startup, and UI evidence capture. The screenshots were captured but not manually pixel-reviewed, so visual acceptance remains open.
+PRs #3 through #13 are merged into `main`. PR #13's merge commit is `69ccc144c526dd4a3d66d8858c26ef17b256e327`; [PR workflow run 44464075883](https://github.com/kavianpcx/ledgerline/actions/runs/44464075883) passed analysis, all ten test suites, the Windows release build, installer packaging, and UI evidence capture. Its post-merge workflow is running. The screenshots were captured but not manually pixel-reviewed, so visual acceptance remains open.
 
 The POS supports split cash and bank-transfer tenders, invoice payment history, receipt-to-journal reconciliation, a saved default tax rate, invoice discounts, and full-invoice returns with stock and ledger reversals. Schema v7 links older receipts only when the journal match is exact; unmatched history remains flagged for review. These changes are not part of the published Windows release. Partial-line returns remain open.
 
 ## Known limitations
 
-Ledgerline is not production-ready. The Android application, secure roles and authentication, multi-device synchronization, complete multi-currency accounting, restaurant table/kitchen workflows, partial-line returns, printable invoices and thermal receipts, POS shortcuts and customer records, product images, XLSX/DOCX/PDF import, encrypted backups, payroll/tax rules, market data, and a complete updater remain unfinished. Product photos and built-in icons are being implemented in PR #13; that work is not part of `main` or the published release. The product requirements stay active; see the audit for risks and implementation status.
+Ledgerline is not production-ready. The Android application, secure roles and authentication, multi-device synchronization, complete multi-currency accounting, restaurant table/kitchen workflows, partial-line returns, printable invoices and thermal receipts, POS shortcuts and customer records, XLSX/DOCX/PDF import, encrypted backups, payroll/tax rules, market data, and a complete updater remain unfinished. Product photos and curated icons are in `main`; reviewed XLSX product import is being implemented in PR #14. The product requirements stay active; see the audit for risks and implementation status.
 
 ## Install the verified Windows release
 
@@ -48,7 +48,7 @@ The Windows Actions workflow builds and packages the application, runs automated
 
 ## Local data, OCR, and updates
 
-Ledgerline stores its SQLite database in the operating system's application-support directory. Local business data remains on the device. Smart Import currently supports CSV plus offline image-to-text OCR; extracted text requires user review and is not automatically posted to the ledger.
+Ledgerline stores its SQLite database in the operating system's application-support directory. Local business data remains on the device. Smart Import supports reviewed CSV product catalogs and offline image-to-text OCR; XLSX product catalog review is under development in PR #14. Extracted OCR text requires user review and is not automatically posted to the ledger.
 
 The update flow can discover GitHub Releases and check the published asset digest before offering the installer. It is not a complete standalone updater: publisher signature verification, genuine download progress and cancellation, install progress, rollback, and an older-to-newer end-to-end test are not implemented.
 
