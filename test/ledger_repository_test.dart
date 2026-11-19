@@ -75,6 +75,151 @@ void main() {
     expect(invoice['total_cents'], 1350);
   });
 
+  test('v8 migration preserves invoices and stock history while adding returns',
+      () async {
+    final directory = await Directory.systemTemp.createTemp('ledgerline-v8-return-');
+    addTearDown(() => directory.delete(recursive: true));
+    final path = directory.path + Platform.pathSeparator + 'legacy.sqlite';
+    sqfliteFfiInit();
+    final legacy = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 8,
+        onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE sales_invoices (
+              id TEXT PRIMARY KEY,
+              invoice_number TEXT NOT NULL,
+              customer_name TEXT NOT NULL,
+              issue_date TEXT NOT NULL,
+              status TEXT NOT NULL,
+              subtotal_cents INTEGER NOT NULL,
+              tax_cents INTEGER NOT NULL,
+              discount_cents INTEGER NOT NULL DEFAULT 0,
+              total_cents INTEGER NOT NULL,
+              created_at TEXT NOT NULL
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE invoice_payments (
+              id TEXT PRIMARY KEY,
+              invoice_id TEXT NOT NULL,
+              payment_date TEXT NOT NULL,
+              amount_cents INTEGER NOT NULL,
+              payment_method TEXT NOT NULL,
+              journal_entry_id TEXT,
+              created_at TEXT NOT NULL
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE stock_movements (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              product_id TEXT NOT NULL,
+              product_sku TEXT NOT NULL,
+              product_name TEXT NOT NULL,
+              movement_type TEXT NOT NULL CHECK (movement_type IN (
+                'opening_balance', 'adjustment', 'sale', 'migration_balance'
+              )),
+              quantity_delta INTEGER NOT NULL CHECK (quantity_delta <> 0),
+              unit_cost_cents INTEGER NOT NULL CHECK (unit_cost_cents >= 0),
+              reference_id TEXT NOT NULL DEFAULT '',
+              description TEXT NOT NULL,
+              occurred_at TEXT NOT NULL,
+              recorded_at TEXT NOT NULL
+            )
+          ''');
+          await db.execute('''
+            CREATE INDEX stock_movements_by_product
+            ON stock_movements(product_id, recorded_at DESC, id DESC)
+          ''');
+          await db.execute('''
+            CREATE INDEX stock_movements_by_reference
+            ON stock_movements(reference_id)
+          ''');
+          await db.execute('''
+            CREATE TRIGGER stock_movements_reject_update
+            BEFORE UPDATE ON stock_movements
+            BEGIN
+              SELECT RAISE(ABORT, 'stock movements are append-only');
+            END
+          ''');
+          await db.execute('''
+            CREATE TRIGGER stock_movements_reject_delete
+            BEFORE DELETE ON stock_movements
+            BEGIN
+              SELECT RAISE(ABORT, 'stock movements are append-only');
+            END
+          ''');
+        },
+      ),
+    );
+    await legacy.insert('sales_invoices', {
+      'id': 'v8-invoice',
+      'invoice_number': 'INV-2026-000001',
+      'customer_name': 'Legacy customer',
+      'issue_date': '2026-11-18',
+      'status': 'paid',
+      'subtotal_cents': 1250,
+      'tax_cents': 100,
+      'discount_cents': 0,
+      'total_cents': 1350,
+      'created_at': '2026-11-18T00:00:00.000Z',
+    });
+    await legacy.insert('invoice_payments', {
+      'id': 'legacy-receipt',
+      'invoice_id': 'v8-invoice',
+      'payment_date': '2026-11-18',
+      'amount_cents': 1350,
+      'payment_method': 'bank_transfer',
+      'journal_entry_id': 'legacy-receipt-journal',
+      'created_at': '2026-11-18T00:00:00.000Z',
+    });
+    await legacy.insert('stock_movements', {
+      'id': 41,
+      'product_id': 'legacy-product',
+      'product_sku': 'LEG-1',
+      'product_name': 'Legacy product',
+      'movement_type': 'sale',
+      'quantity_delta': -1,
+      'unit_cost_cents': 300,
+      'reference_id': 'v8-invoice',
+      'description': 'Invoice sale',
+      'occurred_at': '2026-11-18T00:00:00.000Z',
+      'recorded_at': '2026-11-18T00:00:00.000Z',
+    });
+    await legacy.close();
+
+    final upgraded = await LedgerDatabase.open(path);
+    addTearDown(upgraded.close);
+    final invoice = (await upgraded.handle.query('sales_invoices')).single;
+    expect(invoice['returned_at'], isNull);
+    expect(invoice['total_cents'], 1350);
+    expect(await upgraded.handle.query('invoice_returns'), isEmpty);
+    final receipt = (await upgraded.handle.query('invoice_payments')).single;
+    expect(receipt['id'], 'legacy-receipt');
+    expect(receipt['amount_cents'], 1350);
+    expect(receipt['payment_method'], 'bank_transfer');
+    expect(receipt['journal_entry_id'], 'legacy-receipt-journal');
+    final movement = (await upgraded.handle.query('stock_movements')).single;
+    expect(movement['id'], 41);
+    expect(movement['movement_type'], 'sale');
+    expect(movement['quantity_delta'], -1);
+
+    await upgraded.handle.insert('stock_movements', {
+      'product_id': 'legacy-product',
+      'product_sku': 'LEG-1',
+      'product_name': 'Legacy product',
+      'movement_type': 'customer_return',
+      'quantity_delta': 1,
+      'unit_cost_cents': 300,
+      'reference_id': 'return_v8-invoice',
+      'description': 'Customer returned invoice item',
+      'occurred_at': '2026-11-19T00:00:00.000Z',
+      'recorded_at': '2026-11-19T00:00:00.000Z',
+    });
+    expect(await upgraded.handle.query('stock_movements'), hasLength(2));
+  });
+
   test('requires a confirmed base currency before monetary writes', () async {
     final database = await LedgerDatabase.openInMemory();
     addTearDown(database.close);

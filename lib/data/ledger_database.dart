@@ -12,7 +12,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 8,
+        version: 9,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -28,7 +28,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       inMemoryDatabasePath,
       options: OpenDatabaseOptions(
-        version: 8,
+        version: 9,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -77,6 +77,7 @@ class LedgerDatabase {
     );
     await _createProductInvoiceAndSettingsTables(db);
     await _createInvoicePaymentsTable(db);
+    await _createInvoiceReturnsTable(db);
     await _upgradeProductsToV4(db);
     await _createStockMovementsTable(db);
   }
@@ -107,8 +108,54 @@ class LedgerDatabase {
     if (oldVersion < 8) {
       await _upgradeSalesInvoicesToV8(db);
     }
+    if (oldVersion < 9) {
+      await _upgradeInvoiceReturnsToV9(db);
+    }
   }
 
+
+  static Future<void> _upgradeInvoiceReturnsToV9(Database db) async {
+    final invoiceTables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sales_invoices'",
+    );
+    if (invoiceTables.isNotEmpty) {
+      final columns = await db.rawQuery('PRAGMA table_info(sales_invoices)');
+      if (!columns.any((row) => row['name'] == 'returned_at')) {
+        await db.execute(
+          'ALTER TABLE sales_invoices ADD COLUMN returned_at TEXT',
+        );
+      }
+      await _createInvoiceReturnsTable(db);
+    }
+
+    final movementTables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'stock_movements'",
+    );
+    if (movementTables.isEmpty) {
+      await _createStockMovementsTable(db);
+      return;
+    }
+    await db.execute('DROP TRIGGER IF EXISTS stock_movements_reject_update');
+    await db.execute('DROP TRIGGER IF EXISTS stock_movements_reject_delete');
+    await db.execute(
+      'ALTER TABLE stock_movements RENAME TO stock_movements_v8',
+    );
+    await _createStockMovementsTable(db);
+    await db.execute('''
+      INSERT INTO stock_movements (
+        id, product_id, product_sku, product_name, movement_type,
+        quantity_delta, unit_cost_cents, reference_id, description,
+        occurred_at, recorded_at
+      )
+      SELECT
+        id, product_id, product_sku, product_name, movement_type,
+        quantity_delta, unit_cost_cents, reference_id, description,
+        occurred_at, recorded_at
+      FROM stock_movements_v8
+    ''');
+    await db.execute('DROP TABLE stock_movements_v8');
+    await _createStockMovementsTable(db);
+  }
 
   static Future<void> _upgradeSalesInvoicesToV8(Database db) async {
     final tables = await db.rawQuery(
@@ -269,6 +316,24 @@ class LedgerDatabase {
     }
   }
 
+  static Future<void> _createInvoiceReturnsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS invoice_returns (
+        id TEXT PRIMARY KEY,
+        invoice_id TEXT NOT NULL UNIQUE REFERENCES sales_invoices(id),
+        return_date TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        refund_amount_cents INTEGER NOT NULL CHECK (refund_amount_cents >= 0),
+        refund_method TEXT NOT NULL CHECK (refund_method IN ('cash', 'bank_transfer')),
+        journal_entry_id TEXT UNIQUE REFERENCES journal_entries(id),
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS invoice_returns_by_date ON invoice_returns(return_date DESC)',
+    );
+  }
+
   static Future<void> _createStockMovementsTable(
     Database db, {
     bool seedCurrentBalances = false,
@@ -289,7 +354,8 @@ class LedgerDatabase {
             'opening_balance',
             'adjustment',
             'sale',
-            'migration_balance'
+            'migration_balance',
+            'customer_return'
           )
         ),
         quantity_delta INTEGER NOT NULL CHECK (quantity_delta <> 0),
@@ -367,6 +433,7 @@ class LedgerDatabase {
         tax_cents INTEGER NOT NULL CHECK (tax_cents >= 0),
         discount_cents INTEGER NOT NULL DEFAULT 0 CHECK (discount_cents >= 0 AND discount_cents <= subtotal_cents),
         total_cents INTEGER NOT NULL CHECK (total_cents >= 0),
+        returned_at TEXT,
         created_at TEXT NOT NULL
       )
     ''');

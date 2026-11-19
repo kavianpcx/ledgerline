@@ -4,14 +4,14 @@
 
 This audit compares the current GitHub source with docs/PRODUCT_SPECIFICATION.md and distinguishes merged code from remaining work.
 
-PR #10 was merged as `ea9542effc418144c47b20018da5b46ccd557330`. Post-merge [workflow run 44451374234](https://github.com/kavianpcx/ledgerline/actions/runs/44451374234) passed analysis, all ten test suites, Windows release packaging, installer packaging, and UI evidence capture. The captured screenshots were not manually reviewed.
+PR #11 was merged as `ab6b9188844cb65872850fa27be4d0470174b22c`. Post-merge [workflow run 44457198010](https://github.com/kavianpcx/ledgerline/actions/runs/44457198010) passed analysis, all ten test suites, Windows release packaging, installer packaging, and UI evidence capture. The captured screenshots were not manually reviewed.
 
-PR #2 through #10 provide Windows sidebar repair, currency safeguards, editable and paginated catalog, reviewed CSV import, transactional POS, barcode lookup, partial and split receipts, invoice payment history, and receipt-to-journal reconciliation. The v7 migration links existing manual payments only when date, amount, method, and invoice description match; unmatched receipts remain flagged for review. PR #11 adds a saved default sales-tax rate and per-invoice discounts, including a v8 migration and balanced journal postings; its Actions results are pending and it is not part of main until merged.
+PR #2 through #11 provide Windows sidebar repair, currency safeguards, editable and paginated catalog, reviewed CSV import, transactional POS, barcode lookup, partial and split receipts, invoice payment history and reconciliation, configurable default sales tax, and invoice discounts. The v7 migration links existing manual payments only when date, amount, method, and invoice description match; unmatched receipts remain flagged for review. Schema v8 stores discounts on new invoices and migrates older invoices with a zero discount.
 
 ## What works on main
 
 - Flutter Windows desktop application with integrated title bar, window controls, keyboard shortcuts, and permanent left sidebar.
-- SQLite schema v7 with accounts, journal entries and lines, products, invoices, invoice lines, payment method and journal-entry history, stock movement history, and application settings.
+- SQLite schema v8 with accounts, journal entries and lines, products, invoices, invoice lines, invoice discounts, payment method and journal-entry history, stock movement history, and application settings.
 - Integer minor-unit accounting, confirmed/locked base currency, balanced journals, invoice sales/payments, and opening-inventory posting. Accounting remains limited to one base currency.
 - Editable product records with indexed database search, sorting, and pagination at 10/25/50/100 rows per page.
 - Reviewed CSV product import with mapping, validation, duplicate checks, and atomic catalog/opening-inventory posting.
@@ -21,9 +21,13 @@ PR #2 through #10 provide Windows sidebar repair, currency safeguards, editable 
 
 The tagged v0.5.1-beta.1 release predates the current currency, catalog, import, and POS changes. The verified distribution remains Windows-only.
 
+## PR #12 candidate under validation
+
+The `feature/pos-returns` branch adds whole-invoice returns: it refunds recorded receipts to a chosen cash or bank account, cancels unpaid receivables, restores invoice quantities and reverses discount-aware revenue, tax, inventory, and cost-of-goods postings in one transaction. A v8-to-v9 migration preserves invoice and stock history while adding return records and customer-return movements. Partial-line returns remain unsupported. Automated verification is pending the PR workflow; this branch is not part of main.
+
 ## POS gaps remaining
 
-Refunds/returns, invoice and thermal receipts, keyboard shortcuts, customer records, terminals, and restaurant workflows remain incomplete. Configurable default tax and invoice discounts are being reviewed in PR #11 and are not yet part of main.
+Full-invoice refunds/returns are in PR #12 validation; partial-line returns, invoice and thermal receipts, POS keyboard shortcuts, customer records, terminals, and restaurant workflows remain incomplete. Tax and invoice discounts are already merged into main.
 
 ## Incomplete product functionality
 

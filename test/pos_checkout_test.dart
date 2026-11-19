@@ -574,6 +574,205 @@ void main() {
     expect((await repository.loadProducts()).single.stockQuantity, 4);
   });
 
+  test('full invoice return refunds payment, restores stock, and reverses accounting',
+      () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await _addTestProduct(repository);
+    final product = (await repository.loadProducts()).single;
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Walk-in customer',
+      date: DateTime(2026, 11, 18),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+      discountCents: 100,
+      taxCents: 74,
+      paymentAmountCents: 974,
+    ));
+    final invoice = (await repository.loadSnapshot()).invoices.single;
+
+    await repository.returnInvoice(InvoiceReturnDraft(
+      invoiceId: invoice.id,
+      date: DateTime(2026, 11, 19),
+      reason: 'Customer returned item',
+    ));
+
+    final snapshot = await repository.loadSnapshot();
+    final returned = snapshot.invoices.single;
+    expect(returned.isReturned, isTrue);
+    expect(returned.status, 'paid');
+    expect(snapshot.products.single.stockQuantity, 5);
+    expect(snapshot.balancesByAccount['cash'], 0);
+    expect(snapshot.balancesByAccount['receivables'], 0);
+    expect(snapshot.netIncomeCents, 0);
+    expect(
+      snapshot.assetsCents,
+      snapshot.liabilitiesCents + snapshot.equityCents + snapshot.netIncomeCents,
+    );
+    final paymentHistory = await repository.loadInvoicePaymentHistory(invoice.id);
+    expect(paymentHistory!.isReconciled, isTrue);
+    expect(paymentHistory.balanceDueCents, 0);
+    expect(paymentHistory.returnRecord!.reason, 'Customer returned item');
+
+    final returnRows = await database.handle.query(
+      'invoice_returns',
+      where: 'invoice_id = ?',
+      whereArgs: [invoice.id],
+    );
+    expect(returnRows.single['refund_amount_cents'], 974);
+    final returnLines = await database.handle.query(
+      'journal_lines',
+      where: 'entry_id = ?',
+      whereArgs: ['journal_return_${invoice.id}'],
+    );
+    expect(
+      returnLines.any((line) =>
+          line['account_id'] == 'sales-income' && line['debit_cents'] == 900),
+      isTrue,
+    );
+    expect(
+      returnLines.any((line) =>
+          line['account_id'] == 'tax-payable' && line['debit_cents'] == 74),
+      isTrue,
+    );
+    final movements = await database.handle.query(
+      'stock_movements',
+      where: 'reference_id = ?',
+      whereArgs: ['return_${invoice.id}'],
+    );
+    expect(movements.single['movement_type'], 'customer_return');
+    expect(movements.single['quantity_delta'], 1);
+
+    await database.handle.update(
+      'journal_lines',
+      {'debit_cents': 899},
+      where: "entry_id = ? AND account_id = 'sales-income'",
+      whereArgs: ['journal_return_${invoice.id}'],
+    );
+    expect(
+      (await repository.loadInvoicePaymentHistory(invoice.id))!.isReconciled,
+      isFalse,
+    );
+
+    await expectLater(
+      repository.returnInvoice(InvoiceReturnDraft(
+        invoiceId: invoice.id,
+        date: DateTime(2026, 11, 19),
+        reason: 'Duplicate return',
+      )),
+      throwsStateError,
+    );
+    await expectLater(
+      repository.recordInvoicePayment(InvoicePaymentDraft(
+        invoiceId: invoice.id,
+        amountCents: 1,
+        date: DateTime(2026, 11, 19),
+      )),
+      throwsArgumentError,
+    );
+    expect((await repository.loadProducts()).single.stockQuantity, 5);
+  });
+
+  test('returning a partially paid invoice refunds paid amount and clears receivable',
+      () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await _addTestProduct(repository);
+    final product = (await repository.loadProducts()).single;
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Walk-in customer',
+      date: DateTime(2026, 11, 18),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+      paymentAmountCents: 450,
+    ));
+    final invoice = (await repository.loadSnapshot()).invoices.single;
+
+    await repository.returnInvoice(InvoiceReturnDraft(
+      invoiceId: invoice.id,
+      date: DateTime(2026, 11, 19),
+      reason: 'Order cancelled',
+    ));
+
+    final snapshot = await repository.loadSnapshot();
+    expect(snapshot.invoices.single.isReturned, isTrue);
+    expect(snapshot.invoices.single.balanceDueCents, 0);
+    expect(snapshot.products.single.stockQuantity, 5);
+    expect(snapshot.balancesByAccount['cash'], 0);
+    expect(snapshot.balancesByAccount['receivables'], 0);
+    expect(snapshot.netIncomeCents, 0);
+    expect(
+      snapshot.assetsCents,
+      snapshot.liabilitiesCents + snapshot.equityCents + snapshot.netIncomeCents,
+    );
+    final returnRow = (await database.handle.query('invoice_returns')).single;
+    expect(returnRow['refund_amount_cents'], 450);
+  });
+
+  test('failed return posting rolls back stock, return, and journal changes',
+      () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await _addTestProduct(repository);
+    final product = (await repository.loadProducts()).single;
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Walk-in customer',
+      date: DateTime(2026, 11, 18),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+      paymentAmountCents: 1000,
+    ));
+    final invoice = (await repository.loadSnapshot()).invoices.single;
+    final balancesBefore = (await repository.loadSnapshot()).balancesByAccount;
+
+    await database.handle.execute('''
+      CREATE TRIGGER reject_customer_return
+      BEFORE INSERT ON stock_movements
+      WHEN NEW.movement_type = 'customer_return'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced return posting failure');
+      END
+    ''');
+
+    await expectLater(
+      repository.returnInvoice(InvoiceReturnDraft(
+        invoiceId: invoice.id,
+        date: DateTime(2026, 11, 19),
+        reason: 'Return rollback check',
+      )),
+      throwsA(anything),
+    );
+
+    final snapshotAfter = await repository.loadSnapshot();
+    expect(snapshotAfter.invoices.single.isReturned, isFalse);
+    expect(snapshotAfter.products.single.stockQuantity, 4);
+    expect(snapshotAfter.balancesByAccount, balancesBefore);
+    expect(await database.handle.query('invoice_returns'), isEmpty);
+    expect(
+      await database.handle.query(
+        'journal_entries',
+        where: 'id = ?',
+        whereArgs: ['journal_return_${invoice.id}'],
+      ),
+      isEmpty,
+    );
+  });
+
   test('partial cash checkout posts the receipt and leaves a balanced receivable',
       () async {
     final repository = await _createRepository();

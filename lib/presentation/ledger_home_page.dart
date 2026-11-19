@@ -426,6 +426,30 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   }
 
 
+  Future<void> _returnInvoice(SalesInvoice invoice) async {
+    if (!_requireAccountingCurrency() || invoice.isReturned || invoice.status == 'void') {
+      return;
+    }
+    final draft = await showDialog<InvoiceReturnDraft>(
+      context: context,
+      builder: (context) => _InvoiceReturnDialog(
+        invoice: invoice,
+        currencyCode: widget.settings.currencyCode,
+      ),
+    );
+    if (draft == null || !mounted) return;
+    try {
+      await widget.repository.returnInvoice(draft);
+      await _reload();
+      if (mounted) _notify(tr(context, 'returnInvoiceSaved'));
+    } on Object catch (error) {
+      if (mounted) {
+        _notify(tr(context, 'returnInvoiceFailed') + ': ' + error.toString());
+      }
+    }
+  }
+
+
   bool _requireAccountingCurrency() {
     if (widget.settings.accountingCurrencyConfigured) return true;
     _notify(tr(context, 'currencySetupRequired'));
@@ -1172,9 +1196,11 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     final partial = invoice.status == 'issued' &&
         invoice.paidCents > 0 &&
         invoice.balanceDueCents > 0;
-    final status = partial
-        ? tr(context, 'partiallyPaid')
-        : tr(context, invoice.status);
+    final status = invoice.isReturned
+        ? tr(context, 'invoiceReturned')
+        : partial
+            ? tr(context, 'partiallyPaid')
+            : tr(context, invoice.status);
     return Card(
       child: Column(
         children: [
@@ -1201,7 +1227,14 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                   icon: const Icon(Icons.history_rounded),
                   label: Text(tr(context, 'paymentHistory')),
                 ),
-                if (invoice.status == 'issued' && invoice.balanceDueCents > 0)
+                if (!invoice.isReturned && invoice.status != 'void')
+                  OutlinedButton.icon(
+                    key: ValueKey('invoice-return-' + invoice.number),
+                    onPressed: () => _returnInvoice(invoice),
+                    icon: const Icon(Icons.assignment_return_outlined),
+                    label: Text(tr(context, 'returnInvoice')),
+                  ),
+                if (!invoice.isReturned && invoice.status == 'issued' && invoice.balanceDueCents > 0)
                   FilledButton.tonalIcon(
                     onPressed: () => _recordInvoicePayment(invoice),
                     icon: const Icon(Icons.payments_outlined),
@@ -2091,6 +2124,8 @@ class _StockMovementHistoryDialogState
                             tr(context, 'stockOpeningBalance'),
                           'adjustment' => tr(context, 'stockAdjustment'),
                           'sale' => tr(context, 'stockSale'),
+                          'customer_return' =>
+                            tr(context, 'stockCustomerReturn'),
                           'migration_balance' =>
                             tr(context, 'stockMigrationBalance'),
                           _ => movement.movementType,
@@ -2479,6 +2514,125 @@ class _InvoiceDialogState extends State<_InvoiceDialog> {
   }
 }
 
+class _InvoiceReturnDialog extends StatefulWidget {
+  const _InvoiceReturnDialog({
+    required this.invoice,
+    required this.currencyCode,
+  });
+
+  final SalesInvoice invoice;
+  final String currencyCode;
+
+  @override
+  State<_InvoiceReturnDialog> createState() => _InvoiceReturnDialogState();
+}
+
+class _InvoiceReturnDialogState extends State<_InvoiceReturnDialog> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final TextEditingController _reasonController = TextEditingController();
+  String _refundMethod = 'cash';
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text(tr(context, 'returnInvoiceTitle')),
+        content: SizedBox(
+          width: 440,
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(tr(context, 'returnInvoiceHint')),
+                  const SizedBox(height: 12),
+                  Text(
+                    tr(context, 'returnRefundAmount') +
+                        ': ' +
+                        CurrencyDefinition.of(widget.currencyCode)
+                            .formatMinorUnits(widget.invoice.paidCents),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    tr(context, 'returnUnpaidCancellation') +
+                        ': ' +
+                        CurrencyDefinition.of(widget.currencyCode)
+                            .formatMinorUnits(widget.invoice.balanceDueCents),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    key: const Key('invoice-return-reason'),
+                    controller: _reasonController,
+                    maxLength: 500,
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      labelText: tr(context, 'returnReason'),
+                    ),
+                    validator: (value) =>
+                        value == null || value.trim().isEmpty
+                            ? tr(context, 'returnReasonRequired')
+                            : null,
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    key: const Key('invoice-return-refund-method'),
+                    initialValue: _refundMethod,
+                    decoration: InputDecoration(
+                      labelText: tr(context, 'returnRefundMethod'),
+                    ),
+                    items: [
+                      DropdownMenuItem(
+                        value: 'cash',
+                        child: Text(tr(context, 'posPaymentCash')),
+                      ),
+                      DropdownMenuItem(
+                        value: 'bank_transfer',
+                        child: Text(tr(context, 'posPaymentBankTransfer')),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => _refundMethod = value);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(tr(context, 'cancel')),
+          ),
+          FilledButton(
+            key: ValueKey('invoice-return-confirm-' + widget.invoice.number),
+            onPressed: () {
+              if (!_formKey.currentState!.validate()) return;
+              Navigator.of(context).pop(
+                InvoiceReturnDraft(
+                  invoiceId: widget.invoice.id,
+                  date: DateTime.now(),
+                  reason: _reasonController.text.trim(),
+                  refundMethod: _refundMethod,
+                ),
+              );
+            },
+            child: Text(tr(context, 'returnInvoice')),
+          ),
+        ],
+      );
+}
+
 class _InvoicePaymentHistoryDialog extends StatefulWidget {
   const _InvoicePaymentHistoryDialog({
     required this.repository,
@@ -2637,6 +2791,50 @@ class _InvoicePaymentHistoryDialogState
                           ),
                         ),
                       ],
+                    if (history.returnRecord != null) ...[
+                      const Divider(height: 1),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          tr(context, 'returnRefundAmount') +
+                              ': ' +
+                              _money(
+                                history.returnRecord!.refundAmountCents,
+                                widget.currencyCode,
+                              ),
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(
+                          _shortDate(context, history.returnRecord!.returnDate) +
+                              ' · ' +
+                              (history.returnRecord!.refundMethod == 'bank_transfer'
+                                  ? tr(context, 'posPaymentBankTransfer')
+                                  : tr(context, 'posPaymentCash')) +
+                              '\n' +
+                              history.returnRecord!.reason,
+                        ),
+                        trailing: Icon(
+                          history.returnRecord!.ledgerPostingMatches
+                              ? Icons.check_circle_outline_rounded
+                              : Icons.warning_amber_rounded,
+                          color: history.returnRecord!.ledgerPostingMatches
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          tr(
+                            context,
+                            history.returnRecord!.ledgerPostingMatches
+                                ? 'returnLedgerMatched'
+                                : 'returnLedgerNeedReview',
+                          ),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               );

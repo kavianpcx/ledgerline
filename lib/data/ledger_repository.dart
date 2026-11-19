@@ -927,6 +927,9 @@ class LedgerRepository {
         throw ArgumentError('The invoice no longer exists.');
       }
       final invoice = invoiceRows.single;
+      if (invoice['returned_at'] != null) {
+        throw ArgumentError('A returned invoice cannot receive a payment.');
+      }
       if (invoice['status'] == 'void') {
         throw ArgumentError('A void invoice cannot receive a payment.');
       }
@@ -969,7 +972,7 @@ class LedgerRepository {
       final updated = await txn.update(
         'sales_invoices',
         {'status': newPaidCents == totalCents ? 'paid' : 'issued'},
-        where: 'id = ? AND status != ?',
+        where: 'id = ? AND status != ? AND returned_at IS NULL',
         whereArgs: [draft.invoiceId, 'void'],
       );
       if (updated != 1) {
@@ -978,6 +981,237 @@ class LedgerRepository {
     });
   }
 
+
+  Future<void> returnInvoice(InvoiceReturnDraft draft) async {
+    final invoiceId = draft.invoiceId.trim();
+    final reason = draft.reason.trim();
+    if (invoiceId.isEmpty || reason.isEmpty || reason.length > 500) {
+      throw ArgumentError('A valid invoice and return reason are required.');
+    }
+    if (!_allowedPaymentMethods.contains(draft.refundMethod)) {
+      throw ArgumentError.value(
+        draft.refundMethod,
+        'refundMethod',
+        'Use cash or bank_transfer.',
+      );
+    }
+
+    await _database.handle.transaction((txn) async {
+      await _requireAccountingCurrency(txn);
+      final invoiceRows = await txn.query(
+        'sales_invoices',
+        where: 'id = ?',
+        whereArgs: [invoiceId],
+        limit: 1,
+      );
+      if (invoiceRows.isEmpty) {
+        throw ArgumentError('The invoice no longer exists.');
+      }
+      final invoice = invoiceRows.single;
+      if (invoice['status'] == 'void') {
+        throw ArgumentError('A void invoice cannot be returned.');
+      }
+      if (invoice['returned_at'] != null) {
+        throw StateError('This invoice has already been returned.');
+      }
+
+      const maxSignedInt = 0x7fffffffffffffff;
+      final subtotal = invoice['subtotal_cents']! as int;
+      final discount = invoice['discount_cents'] as int? ?? 0;
+      final tax = invoice['tax_cents']! as int;
+      final total = invoice['total_cents']! as int;
+      if (discount < 0 || discount > subtotal || tax < 0) {
+        throw StateError('Invoice totals are inconsistent; the return was not posted.');
+      }
+      final netRevenueCents = subtotal - discount;
+      if (tax > maxSignedInt - netRevenueCents ||
+          total != netRevenueCents + tax) {
+        throw StateError('Invoice totals are inconsistent; the return was not posted.');
+      }
+
+      final paymentRows = await txn.query(
+        'invoice_payments',
+        columns: ['amount_cents'],
+        where: 'invoice_id = ?',
+        whereArgs: [invoiceId],
+      );
+      var refundCents = 0;
+      for (final row in paymentRows) {
+        final amount = row['amount_cents']! as int;
+        if (amount <= 0 || refundCents > maxSignedInt - amount) {
+          throw StateError('Invoice payment history is invalid.');
+        }
+        refundCents += amount;
+      }
+      if (refundCents > total) {
+        throw StateError('Recorded payments exceed the invoice total.');
+      }
+      final unpaidBalanceCents = total - refundCents;
+
+      final invoiceLines = await txn.query(
+        'invoice_lines',
+        columns: [
+          'product_id',
+          'description',
+          'quantity',
+          'unit_cost_cents',
+        ],
+        where: 'invoice_id = ?',
+        whereArgs: [invoiceId],
+        orderBy: 'id ASC',
+      );
+      if (invoiceLines.isEmpty) {
+        throw StateError('The invoice has no returnable inventory lines.');
+      }
+
+      final returnedLines =
+          <({Product product, String description, int quantity, int unitCostCents})>[];
+      var costTotal = 0;
+      for (final line in invoiceLines) {
+        final productId = line['product_id'] as String?;
+        if (productId == null) {
+          throw StateError('An invoice product was deleted and cannot be restocked.');
+        }
+        final productRows = await txn.query(
+          'products',
+          where: 'id = ?',
+          whereArgs: [productId],
+          limit: 1,
+        );
+        if (productRows.isEmpty) {
+          throw StateError('An invoice product was deleted and cannot be restocked.');
+        }
+        final product = Product.fromRow(productRows.single);
+        final quantity = line['quantity']! as int;
+        final unitCostCents = line['unit_cost_cents']! as int;
+        if (quantity <= 0 || unitCostCents < 0 ||
+            quantity > maxSignedInt - product.stockQuantity ||
+            unitCostCents > maxSignedInt ~/ quantity) {
+          throw StateError('Invoice inventory values are invalid.');
+        }
+        final lineCost = unitCostCents * quantity;
+        if (costTotal > maxSignedInt - lineCost) {
+          throw StateError('Returned inventory value exceeds the supported range.');
+        }
+        costTotal += lineCost;
+        returnedLines.add((
+          product: product,
+          description: line['description']! as String,
+          quantity: quantity,
+          unitCostCents: unitCostCents,
+        ));
+      }
+
+      final returnId = 'return_' + invoiceId;
+      final journalId = 'journal_' + returnId;
+      final createdAt = DateTime.now().toUtc().toIso8601String();
+      final hasJournalEntry = netRevenueCents > 0 ||
+          tax > 0 ||
+          refundCents > 0 ||
+          unpaidBalanceCents > 0 ||
+          costTotal > 0;
+
+      if (hasJournalEntry) {
+        await txn.insert('journal_entries', {
+          'id': journalId,
+          'entry_date': _dateOnly(draft.date),
+          'description':
+              'Sales return · ' + (invoice['invoice_number']! as String) + ' · ' + reason,
+          'created_at': createdAt,
+        });
+
+        Future<void> insertLine({
+          required String accountId,
+          required int debitCents,
+          required int creditCents,
+        }) async {
+          if (debitCents == 0 && creditCents == 0) return;
+          await txn.insert('journal_lines', {
+            'entry_id': journalId,
+            'account_id': accountId,
+            'debit_cents': debitCents,
+            'credit_cents': creditCents,
+          });
+        }
+
+        await insertLine(
+          accountId: 'sales-income',
+          debitCents: netRevenueCents,
+          creditCents: 0,
+        );
+        await insertLine(
+          accountId: 'tax-payable',
+          debitCents: tax,
+          creditCents: 0,
+        );
+        await insertLine(
+          accountId: draft.refundMethod == 'bank_transfer' ? 'bank' : 'cash',
+          debitCents: 0,
+          creditCents: refundCents,
+        );
+        await insertLine(
+          accountId: 'receivables',
+          debitCents: 0,
+          creditCents: unpaidBalanceCents,
+        );
+        await insertLine(
+          accountId: 'inventory',
+          debitCents: costTotal,
+          creditCents: 0,
+        );
+        await insertLine(
+          accountId: 'cost-of-goods',
+          debitCents: 0,
+          creditCents: costTotal,
+        );
+      }
+
+      for (final line in returnedLines) {
+        final updated = await txn.rawUpdate(
+          'UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?',
+          [line.quantity, line.product.id],
+        );
+        if (updated != 1) {
+          throw StateError('Product stock changed while returning the invoice.');
+        }
+        await _insertStockMovement(
+          txn,
+          productId: line.product.id,
+          productSku: line.product.sku,
+          productName: line.product.name,
+          movementType: 'customer_return',
+          quantityDelta: line.quantity,
+          unitCostCents: line.unitCostCents,
+          referenceId: returnId,
+          description: 'Return of invoice ' +
+              (invoice['invoice_number']! as String) +
+              ' · ' +
+              line.description,
+          occurredAt: draft.date,
+        );
+      }
+
+      await txn.insert('invoice_returns', {
+        'id': returnId,
+        'invoice_id': invoiceId,
+        'return_date': _dateOnly(draft.date),
+        'reason': reason,
+        'refund_amount_cents': refundCents,
+        'refund_method': draft.refundMethod,
+        'journal_entry_id': hasJournalEntry ? journalId : null,
+        'created_at': createdAt,
+      });
+      final updated = await txn.update(
+        'sales_invoices',
+        {'returned_at': _dateOnly(draft.date)},
+        where: 'id = ? AND returned_at IS NULL AND status != ?',
+        whereArgs: [invoiceId, 'void'],
+      );
+      if (updated != 1) {
+        throw StateError('The invoice changed while returning it.');
+      }
+    });
+  }
 
   Future<InvoicePaymentHistory?> loadInvoicePaymentHistory(
     String invoiceId,
@@ -993,7 +1227,11 @@ class LedgerRepository {
           'invoice_number',
           'customer_name',
           'status',
+          'subtotal_cents',
+          'tax_cents',
+          'discount_cents',
           'total_cents',
+          'returned_at',
         ],
         where: 'id = ?',
         whereArgs: [invoiceId],
@@ -1019,6 +1257,27 @@ class LedgerRepository {
           ledgerPostingMatches: await _paymentJournalPostingMatches(txn, row),
         ));
       }
+      final returnRows = await txn.query(
+        'invoice_returns',
+        where: 'invoice_id = ?',
+        whereArgs: [invoiceId],
+        limit: 1,
+      );
+      final returnRow = returnRows.isEmpty ? null : returnRows.single;
+      final returnRecord = returnRow == null
+          ? null
+          : InvoiceReturnRecord(
+              returnDate: DateTime.parse(returnRow['return_date']! as String),
+              reason: returnRow['reason']! as String,
+              refundAmountCents: returnRow['refund_amount_cents']! as int,
+              refundMethod: returnRow['refund_method']! as String,
+              journalEntryId: returnRow['journal_entry_id'] as String?,
+              ledgerPostingMatches: await _returnJournalPostingMatches(
+                txn,
+                invoice,
+                returnRow,
+              ),
+            );
       return InvoicePaymentHistory(
         invoiceId: invoice['id']! as String,
         invoiceNumber: invoice['invoice_number']! as String,
@@ -1026,8 +1285,157 @@ class LedgerRepository {
         invoiceStatus: invoice['status']! as String,
         invoiceTotalCents: invoice['total_cents']! as int,
         payments: payments,
+        returnRecordExpected: invoice['returned_at'] != null,
+        returnRecord: returnRecord,
       );
     });
+  }
+
+  Future<bool> _returnJournalPostingMatches(
+    DatabaseExecutor executor,
+    Map<String, Object?> invoice,
+    Map<String, Object?> returnRow,
+  ) async {
+    final invoiceId = invoice['id']! as String;
+    final returnId = returnRow['id']! as String;
+    final journalEntryId = returnRow['journal_entry_id'] as String?;
+    if (returnId != 'return_' + invoiceId ||
+        returnRow['invoice_id'] != invoiceId ||
+        invoice['returned_at'] != returnRow['return_date']) {
+      return false;
+    }
+
+    final subtotal = invoice['subtotal_cents']! as int;
+    final discount = invoice['discount_cents'] as int? ?? 0;
+    final tax = invoice['tax_cents']! as int;
+    final total = invoice['total_cents']! as int;
+    const maxSignedInt = 0x7fffffffffffffff;
+    if (discount < 0 || discount > subtotal || tax < 0) return false;
+    final netRevenue = subtotal - discount;
+    if (tax > maxSignedInt - netRevenue ||
+        total != netRevenue + tax) {
+      return false;
+    }
+
+    final refund = returnRow['refund_amount_cents']! as int;
+    final refundMethod = returnRow['refund_method']! as String;
+    if (refund < 0 ||
+        refund > total ||
+        !_allowedPaymentMethods.contains(refundMethod)) {
+      return false;
+    }
+    final unpaidBalance = total - refund;
+    final refundAccount = refundMethod == 'bank_transfer' ? 'bank' : 'cash';
+
+    final invoiceLines = await executor.query(
+      'invoice_lines',
+      columns: ['product_id', 'quantity', 'unit_cost_cents'],
+      where: 'invoice_id = ?',
+      whereArgs: [invoiceId],
+      orderBy: 'id ASC',
+    );
+    if (invoiceLines.isEmpty) return false;
+    var costTotal = 0;
+    for (final line in invoiceLines) {
+      final productId = line['product_id'] as String?;
+      final quantity = line['quantity']! as int;
+      final unitCost = line['unit_cost_cents']! as int;
+      if (productId == null ||
+          quantity <= 0 ||
+          unitCost < 0 ||
+          unitCost > maxSignedInt ~/ quantity) {
+        return false;
+      }
+      final lineCost = unitCost * quantity;
+      if (costTotal > maxSignedInt - lineCost) return false;
+      costTotal += lineCost;
+    }
+
+    final movements = await executor.query(
+      'stock_movements',
+      where: 'reference_id = ?',
+      whereArgs: [returnId],
+      orderBy: 'id ASC',
+    );
+    if (movements.length != invoiceLines.length) return false;
+    for (var index = 0; index < invoiceLines.length; index++) {
+      final line = invoiceLines[index];
+      final movement = movements[index];
+      if (movement['movement_type'] != 'customer_return' ||
+          movement['product_id'] != line['product_id'] ||
+          movement['quantity_delta'] != line['quantity'] ||
+          movement['unit_cost_cents'] != line['unit_cost_cents']) {
+        return false;
+      }
+    }
+
+    final expectedLines = <String, List<int>>{};
+    void expectLine(String accountId, int debit, int credit) {
+      if (debit > 0 || credit > 0) {
+        expectedLines[accountId] = [debit, credit];
+      }
+    }
+
+    expectLine('sales-income', netRevenue, 0);
+    expectLine('tax-payable', tax, 0);
+    expectLine(refundAccount, 0, refund);
+    expectLine('receivables', 0, unpaidBalance);
+    expectLine('inventory', costTotal, 0);
+    expectLine('cost-of-goods', 0, costTotal);
+
+    if (journalEntryId == null) {
+      return expectedLines.isEmpty;
+    }
+    if (journalEntryId != 'journal_' + returnId) return false;
+    final entryRows = await executor.query(
+      'journal_entries',
+      columns: ['entry_date'],
+      where: 'id = ?',
+      whereArgs: [journalEntryId],
+      limit: 1,
+    );
+    if (entryRows.isEmpty ||
+        entryRows.single['entry_date'] != returnRow['return_date']) {
+      return false;
+    }
+    final lines = await executor.query(
+      'journal_lines',
+      where: 'entry_id = ?',
+      whereArgs: [journalEntryId],
+    );
+    if (lines.length != expectedLines.length || lines.length < 2) {
+      return false;
+    }
+    final actualLines = <String, List<int>>{};
+    var debitTotal = 0;
+    var creditTotal = 0;
+    for (final line in lines) {
+      final accountId = line['account_id']! as String;
+      final debit = line['debit_cents']! as int;
+      final credit = line['credit_cents']! as int;
+      if (debit < 0 ||
+          credit < 0 ||
+          (debit == 0 && credit == 0) ||
+          (debit > 0 && credit > 0) ||
+          debitTotal > maxSignedInt - debit ||
+          creditTotal > maxSignedInt - credit ||
+          actualLines.containsKey(accountId)) {
+        return false;
+      }
+      actualLines[accountId] = [debit, credit];
+      debitTotal += debit;
+      creditTotal += credit;
+    }
+    if (debitTotal != creditTotal) return false;
+    for (final entry in expectedLines.entries) {
+      final actual = actualLines[entry.key];
+      if (actual == null ||
+          actual[0] != entry.value[0] ||
+          actual[1] != entry.value[1]) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<bool> _paymentJournalPostingMatches(
@@ -1381,7 +1789,11 @@ class LedgerRepository {
       'invoice_lines',
       'app_settings',
     };
-    if (!allowLegacySchema) requiredTables.add('invoice_payments');
+    if (!allowLegacySchema) {
+      requiredTables
+        ..add('invoice_payments')
+        ..add('invoice_returns');
+    }
     final tableRows = await database.rawQuery(
       "SELECT name FROM sqlite_master WHERE type = 'table'",
     );
