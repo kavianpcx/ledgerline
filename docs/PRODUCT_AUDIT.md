@@ -15,7 +15,7 @@ PR #2 through #16 provide Windows sidebar repair, currency safeguards, editable 
 - Integer minor-unit accounting, confirmed/locked base currency, balanced journals, invoice sales/payments, and opening-inventory posting. Accounting remains limited to one base currency.
 - Editable product records with indexed database search, sorting, and pagination at 10/25/50/100 rows per page.
 - Reviewed CSV and XLSX product import with mapping, validation, duplicate checks, and atomic catalog/opening-inventory posting. Product images and built-in icons are also supported on main.
-- Basic retail POS with persisted cart, price/stock revalidation, exact barcode lookup from keyboard input and Enter, F2/F4 keyboard shortcuts, searchable suggestions from prior invoice customer names, cash or bank-transfer payments including partial receipts and split tenders, on-account invoices, and atomic sale/inventory/journal/payment postings. Full-invoice returns refund collected payments, cancel remaining receivables, restore stock, and reverse journal postings transactionally.
+- Basic retail POS with persisted cart, price/stock revalidation, exact barcode lookup from keyboard input and Enter, F2/F4 keyboard shortcuts, searchable suggestions from prior invoice customer names, cash or bank-transfer payments including partial receipts and split tenders, on-account invoices, and atomic sale/inventory/journal/payment postings. Full-invoice returns refund collected payments, cancel remaining receivables, restore stock, and reverse journal postings transactionally. A4 invoice and 80 mm receipt PDFs render saved invoice snapshots in English and Persian and open the system print dialog; physical printer output is not verified.
 - Append-only stock history for opening balances, CSV imports, adjustments, sales, and full-invoice customer returns. Existing quantities migrate as labeled balance-forward records; earlier events are not reconstructed.
 - English and Persian UI, light/dark themes, SQLite backup/restore with integrity checks, offline Tesseract OCR text extraction, and partial GitHub release discovery.
 
@@ -33,7 +33,7 @@ Full-invoice refunds/returns, F2/F4 POS shortcuts, and searchable suggestions fr
 - People/operations: no service-layer employee roles, manager area, shifts, idempotent daily close, payroll, or protected management dashboard.
 - Security/sync: no authenticated pairing, transport policy, conflict handling, cross-device duplicate-post prevention, application-encrypted database/backups, credential vault, or verified account recovery.
 - Platforms/releases: no Android build/release, camera scanner, biometrics, or physical-device test. The Windows updater still lacks trusted publisher verification, truthful progress/cancel, safe installer handoff, rollback, and an older-to-newer recovery test.
-- Markets/hardware: no verified exchange/market provider, printing, authorized terminal workflow, or complete functional settings center.
+- Markets/hardware: no verified exchange/market provider, authorized terminal workflow, or complete functional settings center. Printer hardware and model-specific formatting remain unverified.
 
 ## Risks and verification limits
 
@@ -41,7 +41,7 @@ CI proves only the checks included in a workflow. Manual review of the PR #6 and
 
 ## Next implementation order
 
-1. Add partial-line returns, invoice/thermal receipt printing, and customer records.
+1. Add partial-line returns and persistent customer records; validate A4 and thermal output with supported printer hardware.
 2. Add document table parsing and structured OCR with review and confidence signals.
 3. Add purchasing, suppliers, stock reconciliation, and multiple warehouses.
 4. Implement service-layer permissions, protected management, shifts, and idempotent close.

@@ -7,6 +7,7 @@ import 'package:ledgerline/data/ledger_repository.dart';
 import 'package:ledgerline/domain/product.dart';
 import 'package:ledgerline/domain/sales_invoice.dart';
 import 'package:ledgerline/presentation/pos_page.dart';
+import 'package:ledgerline/services/invoice_print_service.dart';
 
 const _barcodeProduct = Product(
   id: 'product_barcode',
@@ -687,6 +688,99 @@ void main() {
     );
     expect((await repository.loadSnapshot()).invoices, hasLength(1));
     expect((await repository.loadProducts()).single.stockQuantity, 4);
+  });
+
+  test('invoice print data preserves historical lines and paid balance', () async {
+    final repository = await _createRepository();
+    addTearDown(repository.close);
+    await _addTestProduct(repository);
+    final product = (await repository.loadProducts()).single;
+
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Print customer',
+      date: DateTime(2026, 11, 18),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+      paymentAmountCents: 400,
+    ));
+    final invoice = (await repository.loadSnapshot()).invoices.single;
+
+    await repository.updateProduct(
+      product.id,
+      const ProductDraft(
+        sku: 'COF-01',
+        name: 'Renamed coffee tin',
+        unitPriceCents: 1500,
+        unitCostCents: 400,
+        stockQuantity: 4,
+        category: 'Coffee',
+      ),
+    );
+
+    final printable = await repository.loadInvoicePrintData(invoice.id);
+    expect(printable, isNotNull);
+    expect(printable!.invoiceNumber, invoice.number);
+    expect(printable.customerName, 'Print customer');
+    expect(printable.lines, hasLength(1));
+    expect(printable.lines.single.description, 'Coffee tin');
+    expect(printable.lines.single.quantity, 1);
+    expect(printable.lines.single.unitPriceCents, 1000);
+    expect(printable.lines.single.lineTotalCents, 1000);
+    expect(printable.paidCents, 400);
+    expect(printable.balanceDueCents, 600);
+    expect(printable.isReturned, isFalse);
+  });
+
+  test('A4 and thermal receipt PDFs render in English and Persian', () async {
+    final service = InvoicePrintService();
+    final invoice = InvoicePrintData(
+      invoiceNumber: 'INV-2026-000001',
+      customerName: 'Print customer',
+      issueDate: DateTime(2026, 11, 18),
+      status: 'issued',
+      subtotalCents: 1000,
+      discountCents: 100,
+      taxCents: 74,
+      totalCents: 974,
+      paidCents: 450,
+      isReturned: false,
+      lines: const [
+        InvoicePrintLine(
+          description: 'Coffee tin',
+          quantity: 1,
+          unitPriceCents: 1000,
+          lineTotalCents: 1000,
+        ),
+      ],
+    );
+
+    final a4 = await service.buildPdf(
+      invoice: invoice,
+      businessName: 'Ledgerline Test Shop',
+      currencyCode: 'USD',
+      format: InvoicePrintFormat.a4,
+      isPersian: false,
+    );
+    final receipt = await service.buildPdf(
+      invoice: invoice,
+      businessName: 'Ledgerline Test Shop',
+      currencyCode: 'USD',
+      format: InvoicePrintFormat.thermal80,
+      isPersian: false,
+    );
+    final persian = await service.buildPdf(
+      invoice: invoice,
+      businessName: 'فروشگاه آزمایشی',
+      currencyCode: 'USD',
+      format: InvoicePrintFormat.a4,
+      isPersian: true,
+    );
+
+    expect(String.fromCharCodes(a4.take(5)), '%PDF-');
+    expect(String.fromCharCodes(receipt.take(5)), '%PDF-');
+    expect(String.fromCharCodes(persian.take(5)), '%PDF-');
+    expect(a4.length, greaterThan(1000));
+    expect(receipt.length, greaterThan(1000));
+    expect(persian.length, greaterThan(1000));
   });
 
   test('full invoice return refunds payment, restores stock, and reverses accounting',
