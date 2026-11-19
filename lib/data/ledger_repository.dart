@@ -338,6 +338,19 @@ class LedgerRepository {
     return products;
   }
 
+  Future<Product?> loadProductByBarcode(String barcode) async {
+    final normalizedBarcode = barcode.trim();
+    if (normalizedBarcode.isEmpty) return null;
+    final rows = await _database.handle.query(
+      'products',
+      where: 'barcode = ?',
+      whereArgs: [normalizedBarcode],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return Product.fromRow(rows.single);
+  }
+
   Future<ProductPage> loadProductPage({
     String query = '',
     int pageIndex = 0,

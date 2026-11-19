@@ -109,6 +109,7 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
             key: const Key('pos-product-search'),
             controller: _searchController,
             textInputAction: TextInputAction.search,
+            onSubmitted: (value) => unawaited(_lookupBarcode(value)),
             onChanged: (_) {
               _searchDebounce?.cancel();
               _searchDebounce = Timer(const Duration(milliseconds: 250), () {
@@ -117,6 +118,7 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
             },
             decoration: InputDecoration(
               labelText: tr(context, 'posProductSearch'),
+              helperText: tr(context, 'posBarcodeHelp'),
               prefixIcon: const Icon(Icons.search_rounded),
               suffixIcon: _searchController.text.isEmpty
                   ? null
@@ -357,7 +359,10 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
             onPressed: _checkingOut ? null : () => _changeQuantity(line.product, -1),
             icon: const Icon(Icons.remove_circle_outline_rounded),
           ),
-          Text(line.quantity.toString()),
+          Text(
+            line.quantity.toString(),
+            key: ValueKey('pos-quantity-' + line.product.sku),
+          ),
           IconButton(
             key: ValueKey('pos-increase-' + line.product.sku),
             tooltip: tr(context, 'add'),
@@ -451,6 +456,39 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
 
   void _addProduct(Product product) {
     _changeQuantity(product, 1);
+  }
+
+  Future<void> _lookupBarcode(String value) async {
+    final barcode = value.trim();
+    if (barcode.isEmpty) return;
+    _searchDebounce?.cancel();
+    try {
+      final product = await widget.repository.loadProductByBarcode(barcode);
+      if (!mounted) return;
+      if (product == null) {
+        await _loadProducts(pageIndex: 0);
+        if (mounted) _notify(tr(context, 'posBarcodeNotFound'));
+        return;
+      }
+
+      final currentQuantity = _cart[product.id]?.quantity ?? 0;
+      if (currentQuantity >= product.stockQuantity) {
+        _notify(
+          tr(context, currentQuantity == 0 ? 'posProductOutOfStock' : 'posStockLimit'),
+        );
+        return;
+      }
+      _changeQuantity(product, 1);
+      if ((_cart[product.id]?.quantity ?? 0) == currentQuantity) return;
+
+      _searchController.clear();
+      await _loadProducts(pageIndex: 0);
+      if (mounted) _notify(tr(context, 'posBarcodeAdded'));
+    } on Object catch (error) {
+      if (mounted) {
+        _notify(tr(context, 'posBarcodeLookupFailed') + ': ' + error.toString());
+      }
+    }
   }
 
   void _changeQuantity(Product product, int delta) {

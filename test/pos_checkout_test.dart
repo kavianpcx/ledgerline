@@ -7,6 +7,16 @@ import 'package:ledgerline/domain/product.dart';
 import 'package:ledgerline/domain/sales_invoice.dart';
 import 'package:ledgerline/presentation/pos_page.dart';
 
+const _barcodeProduct = Product(
+  id: 'product_barcode',
+  sku: 'BAR-1',
+  name: 'Barcode item',
+  unitPriceCents: 1000,
+  unitCostCents: 400,
+  stockQuantity: 5,
+  barcode: '000012345678',
+);
+
 const _coffee = Product(
   id: 'product_coffee',
   sku: 'COF-01',
@@ -45,9 +55,12 @@ Future<void> _addTestProduct(LedgerRepository repository) =>
       category: 'Coffee',
     ));
 
-Future<_FakePosRepository> _createWidgetRepository(WidgetTester tester) async {
+Future<_FakePosRepository> _createWidgetRepository(
+  WidgetTester tester, {
+  List<Product>? products,
+}) async {
   final database = (await tester.runAsync(LedgerDatabase.openInMemory))!;
-  return _FakePosRepository(database);
+  return _FakePosRepository(database, products: products);
 }
 
 Future<void> _mountPos(
@@ -79,6 +92,84 @@ Future<void> _mountPos(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('barcode lookup trims input and requires the complete code', () async {
+    final repository = await _createRepository();
+    addTearDown(repository.close);
+    await repository.createProduct(const ProductDraft(
+      sku: 'BAR-1',
+      name: 'Barcode item',
+      unitPriceCents: 1000,
+      unitCostCents: 400,
+      stockQuantity: 5,
+      barcode: '000012345678',
+    ));
+    final product = (await repository.loadProducts()).single;
+
+    expect(
+      (await repository.loadProductByBarcode(' 000012345678 '))?.id,
+      product.id,
+    );
+    expect(await repository.loadProductByBarcode('00001234567'), isNull);
+    expect(await repository.loadProductByBarcode(''), isNull);
+  });
+
+  testWidgets('scanner input adds exact barcode matches and caps quantity at stock',
+      (tester) async {
+    final repository = await _createWidgetRepository(
+      tester,
+      products: const [_barcodeProduct],
+    );
+    addTearDown(() async {
+      await tester.runAsync(repository.close);
+    });
+
+    await _mountPos(
+      tester,
+      repository,
+      const {},
+      onCompleted: () async {},
+      onCartChanged: (_) {},
+    );
+
+    final search = find.byKey(const Key('pos-product-search'));
+    final quantity = find.byKey(const ValueKey('pos-quantity-BAR-1'));
+    await _pumpUntil(
+      tester,
+      () => find.byKey(const ValueKey('pos-product-BAR-1')).evaluate().isNotEmpty,
+    );
+
+    Future<void> scanAndExpectQuantity(int expected) async {
+      await tester.tap(search);
+      await tester.enterText(search, _barcodeProduct.barcode);
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await _pumpUntil(tester, () {
+        if (quantity.evaluate().isEmpty) return false;
+        return tester.widget<Text>(quantity).data == expected.toString();
+      });
+    }
+
+    for (var expected = 1; expected <= _barcodeProduct.stockQuantity; expected++) {
+      await scanAndExpectQuantity(expected);
+    }
+
+    await tester.tap(search);
+    await tester.enterText(search, _barcodeProduct.barcode);
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.widget<Text>(quantity).data, '5');
+
+    final decrease = find.byKey(const ValueKey('pos-decrease-BAR-1'));
+    await tester.ensureVisible(decrease);
+    await tester.tap(decrease);
+    await tester.pump();
+    expect(tester.widget<Text>(quantity).data, '4');
+    final increase = find.byKey(const ValueKey('pos-increase-BAR-1'));
+    await tester.ensureVisible(increase);
+    await tester.tap(increase);
+    await tester.pump();
+    expect(tester.widget<Text>(quantity).data, '5');
+  });
 
   testWidgets('cash checkout submits the selected cart and full payment',
       (tester) async {
@@ -427,10 +518,19 @@ void main() {
 }
 
 class _FakePosRepository extends LedgerRepository {
-  _FakePosRepository(super.database);
+  _FakePosRepository(super.database, {List<Product>? products})
+      : _products = products ?? [_coffee];
 
-  final List<Product> _products = [_coffee];
+  final List<Product> _products;
   final List<InvoiceDraft> invoiceDrafts = [];
+
+  @override
+  Future<Product?> loadProductByBarcode(String barcode) async {
+    for (final product in _products) {
+      if (product.barcode == barcode.trim()) return product;
+    }
+    return null;
+  }
 
   @override
   Future<ProductPage> loadProductPage({
