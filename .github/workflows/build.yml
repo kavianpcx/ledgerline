@@ -356,9 +356,9 @@ jobs:
           $scenarios = @('titlebar', 'windows-sidebar-wide', 'windows-sidebar-medium', 'windows-sidebar-narrow', 'settings-light', 'settings-dark', 'settings-fa', 'currency-popup')
           foreach ($scenario in $scenarios) {
             Write-Host "Building visual scenario: $scenario"
-            & flutter build windows --debug "--dart-define=LEDGERLINE_VISUAL_SCENARIO=$scenario"
+            & flutter build windows --release "--dart-define=LEDGERLINE_VISUAL_SCENARIO=$scenario"
             if ($LASTEXITCODE -ne 0) { throw "Windows debug build failed for scenario $scenario." }
-            $applicationPath = Join-Path $PWD 'build/windows/x64/runner/Debug/ledgerline.exe'
+            $applicationPath = Join-Path $PWD 'build/windows/x64/runner/Release/ledgerline.exe'
             if (-not (Test-Path -LiteralPath $applicationPath)) { throw 'Debug application executable was not produced.' }
             $process = Start-Process -FilePath $applicationPath -PassThru
             for ($attempt = 0; $attempt -lt 30; $attempt++) {
@@ -405,7 +405,14 @@ jobs:
             Start-Sleep -Seconds 3
             if ([LedgerlineWindowTest]::GetForegroundWindow() -ne $process.MainWindowHandle) { throw "$scenario was not the foreground window when its screenshot was captured." }
             $imagePath = Join-Path $evidenceDirectory ($scenario + '.png')
-            Save-WindowEvidence -WindowHandle $process.MainWindowHandle -ImagePath $imagePath -Scenario $scenario
+            try {
+              Save-WindowEvidence -WindowHandle $process.MainWindowHandle -ImagePath $imagePath -Scenario $scenario
+            } catch {
+              $verificationError = $scenario + ': ' + $_.Exception.Message
+              $script:uiVerificationFailures.Add($verificationError)
+              Add-Content -Path $evidenceReport -Value ('verification_error=' + $verificationError) -Encoding utf8
+              Write-Host ('UI_TEXT_ASSERTION_FAILED ' + $verificationError)
+            }
             if ($scenario -eq 'titlebar') {
               try {
                 [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
