@@ -4,11 +4,11 @@
 
 This audit compares the current GitHub source with `docs/PRODUCT_SPECIFICATION.md` and distinguishes merged code from changes under review.
 
-Current `main` is `ab615a02f369155fbd5ad44ab170f0a3c7c4005a`. PRs #2 through #5 are merged: Windows sidebar repair, currency safeguards, editable/paginated catalog, and reviewed product CSV import. The main push workflow [run 44371927172](https://github.com/kavianpcx/ledgerline/actions/runs/44371927172) completed successfully, including analysis, the test matrix, and Windows packaging/smoke checks.
+Current `main` is `571db3cfc8452d1ee28b64574918a13fb571f2b6`. PRs #2 through #6 are merged: Windows sidebar repair, currency safeguards, editable/paginated catalog, reviewed product CSV import, and transactional POS with stock history. PR #6's head passed [workflow run 44424250900](https://github.com/kavianpcx/ledgerline/actions/runs/44424250900), including analysis, ten test suites, Windows release build, and installer smoke. The post-merge main workflow [run 44425936458](https://github.com/kavianpcx/ledgerline/actions/runs/44425936458) was still in progress when this snapshot was recorded.
 
-Open PR #6, `feature/pos-checkout`, is based on that main commit. The POS/stock-history code revision `f4f38dbdcde134410bcbe425fbe9731386d643e3` passed [workflow run 44410714430](https://github.com/kavianpcx/ledgerline/actions/runs/44410714430): analysis, all ten test-file jobs, Windows release build and installer smoke, eight automated UI scenarios, and artifact uploads passed. The audit-only follow-up `32e43b1198043d6c66a922b23b109b96ee4e5f46` passed [workflow run 44412760947](https://github.com/kavianpcx/ledgerline/actions/runs/44412760947). The release-publish job is skipped for pull-request events.
+PR #6 merged as `571db3c`. Run 91 passed the merged source head immediately before the squash merge. It included all ten test suites, a Windows release build, installer smoke checks, and the UI-capture workflow. The release-publish job is skipped for pull-request events.
 
-The Windows CI screenshots cover the title bar, sidebar at wide/medium/narrow sizes, settings themes/languages, and currency popup. Their pixels have not been manually reviewed here. High-DPI, resize-edge, drag, and Snap behavior remain unverified. This environment has no Flutter/Dart SDK and terminal DNS cannot reach GitHub; GitHub Actions is the available build/test path.
+Manual review of the run #90 and #91 UI artifacts found blank application windows in light and dark scenarios. The workflow currently checks that a window exists and captures pixels, but it does not confirm that Flutter content rendered; visual acceptance is not established. High-DPI, resize-edge, drag, and Snap behavior remain unverified. CI is the available build/test path in this workspace.
 
 ## What works on main
 
@@ -17,21 +17,25 @@ The Windows CI screenshots cover the title bar, sidebar at wide/medium/narrow si
 - Integer minor-unit accounting, base-currency confirmation and locking, basic balanced journals, invoice sales/payments, and opening-inventory posting. Accounting remains limited and uses one base currency.
 - Editable product records and indexed database search/sort/pagination at 10/25/50/100 rows per page.
 - Reviewed CSV product import with field mapping, validation, duplicate checks, and atomic catalog/opening-inventory posting.
+- Paginated retail POS with cart persistence, stale price/stock revalidation, cash or bank-transfer receipts, on-account invoices, and atomic inventory/journal/payment writes. Existing invoice payments migrate as cash.
+- Append-only schema v5 stock movements with product history pages; existing balances migrate as aggregate balance-forward entries.
 - English and Persian UI, light/dark themes, SQLite backup/restore with integrity checks, offline Tesseract OCR text extraction, and a partial GitHub release-discovery flow.
 
 The tagged v0.5.1-beta.1 release predates the currency, catalog, and CSV-import merges. The verified distribution remains Windows-only.
 
 ## Active checkout work
 
-PR #6 adds a paginated POS catalog and navigation-persistent cart. Checkout rechecks price and stock in the SQLite transaction, posts invoice, inventory, sales/COGS journals, and an optional immediate cash or bank-transfer payment atomically; each receipt is recorded against its matching asset account, and unpaid invoices remain on account.
+The merged POS rechecks price and stock, posts invoice, inventory, sales/COGS journals, stock movements, and optional cash or bank-transfer payments in a single SQLite transaction. Unpaid invoices remain on account. The rollback regression forces receipt insertion to fail after sale writes and verifies that invoice, inventory, movement, and journal changes all roll back.
 
-This revision uses schema v5 stock movement records for opening stock, CSV imports, manual adjustments, and sales, plus schema v6 payment methods for cash and bank transfers. It exposes a product-level, database-paginated history view and prevents movement rows from being updated or deleted. The v4-to-v5 migration records each product's current on-hand quantity as one `migration_balance` row. It does not fabricate past events or alter accounting balances. Purchasing, returns, transfers, warehouses, and other inventory operations are not yet modeled.
+Schema v5 records opening stock, CSV imports, adjustments, and sales as append-only movements with paginated product history. Existing quantities migrate as one labeled `migration_balance` per product, without inventing prior events or changing accounting balances. Schema v6 adds payment method history; existing payment rows retain their values and default to cash.
+
+The active `feature/pos-barcode-entry` branch adds exact barcode lookup from the POS field's Enter action, aimed at keyboard-wedge scanners. It keeps leading zeroes and reuses the cart's stock cap and quantity controls. CI is pending. Purchasing, returns, transfers, warehouses, and other inventory operations remain unmodeled.
 
 ## Incomplete product functionality
 
 - Accounting: no complete general ledger/report suite, receivables/payables workflows, full reversals/refunds, currency conversion, transaction-currency snapshots, or configurable jurisdiction rules.
 - Inventory: no product images/variants/suppliers, multiple warehouses, receiving/purchasing, returns/transfers, serial/batch tracking, barcode labels, or stock-count workflow. The stock history covers only the movement sources listed above.
-- POS and restaurants: the open branch supports full cash or bank-transfer settlement for basic retail only. Tax/discount controls, split or multiple payments, refunds, receipts, hardware scanners, payment terminals, tables, modifiers, kitchen tickets, and waiter/cashier flows remain absent.
+- POS and restaurants: basic retail checkout supports cash/bank transfer and on-account invoices. The active follow-up branch adds typed barcode lookup for keyboard-wedge scanners; camera scanning is not implemented. POS tax/discount controls, split or partial settlement, refunds/returns, receipts, payment history/reconciliation, terminals, tables, modifiers, kitchen tickets, and waiter/cashier flows remain unfinished.
 - Smart Import: CSV import and offline image-to-text OCR exist. XLSX/XLS, DOCX/PDF table parsing, document classification, confidence scoring, and reviewed financial import drafts are unfinished.
 - People and operations: no service-boundary employee roles, manager area, shifts, idempotent daily close, payroll, or protected management dashboard.
 - Sync and security: no authenticated device pairing, transport policy, conflict handling, duplicate-post prevention across devices, application-encrypted database/backup, credential vault, or verified account recovery.
@@ -42,11 +46,11 @@ This revision uses schema v5 stock movement records for opening stock, CSV impor
 
 The product snapshot still loads the full catalog for dashboard state, and journal/invoice snapshots are capped at 200 rows; those paths need pagination and indexed filters before large datasets. Product history is bounded by database pages, but its oldest migrated record is only an aggregate balance, not a reconstructed audit trail.
 
-CI proves only the checks included in that run. Screenshot capture is not a visual review, and emulator/CI results are not physical Android evidence. The current source is not production-ready for multi-user, multi-device, or sensitive financial use.
+CI proves only the checks included in that run. Manual review found the current Windows UI-capture artifacts blank, so Windows visual acceptance remains open. Emulator/CI results are not physical Android evidence. The current source is not production-ready for multi-user, multi-device, or sensitive financial use.
 
 ## Next implementation order
 
-1. Verify the current PR #6 head on CI, then complete retail POS controls and receipts.
+1. Verify the barcode-entry follow-up, then add configurable POS tax/discount, partial and split settlement, payment history/reconciliation, returns, and receipts.
 2. Add inventory purchasing, movement/accounting reconciliation, returns, and warehouse support.
 3. Add service-layer permissions, protected management, shifts, and idempotent close.
 4. Implement Android workflows and secure synchronization with explicit conflict and duplicate-posting rules.
