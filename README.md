@@ -20,9 +20,9 @@ PR [#2](https://github.com/kavianpcx/ledgerline/pull/2) restored permanent left-
 
 ## Current source and development work
 
-PRs #3 through #8 are merged into `main`. Main is `990e04a2ae015c1835b64fc28b230ed915802cdc`. Its post-merge [workflow run 44441447260](https://github.com/kavianpcx/ledgerline/actions/runs/44441447260) passed analyzer, all ten test suites, the Windows release build, installer packaging, and UI evidence capture. The screenshots were not manually reviewed, so visual acceptance remains open.
+PRs #3 through #9 are merged into `main`. Main is `c1eb2dd56f1242a178a38d43dca80d8d0c5e7802`. Post-merge [workflow run 44447065073](https://github.com/kavianpcx/ledgerline/actions/runs/44447065073) passed analysis, all ten test suites, Windows release packaging, and UI evidence capture. Screenshots were not manually reviewed, so visual acceptance remains open.
 
-PR #8 adds a cashier-entered partial payment amount and remaining balance to POS checkout. The active `feature/pos-split-tenders` branch extends that flow to cash and bank-transfer split payments. It posts each tender in the existing invoice transaction and adds repository rollback/accounting tests and checkout widget coverage. Its [workflow run 44444262821](https://github.com/kavianpcx/ledgerline/actions/runs/44444262821) passed analyzer, all ten test suites, the Windows release build, and installer packaging. CI captured UI evidence, but the artifact was not manually reviewed. The change is under review in [PR #9](https://github.com/kavianpcx/ledgerline/pull/9).
+PR #9 adds split cash and bank-transfer tenders to POS checkout and is part of `main`. Open [PR #10](https://github.com/kavianpcx/ledgerline/pull/10) adds invoice payment history and reconciliation, links receipts to their journal postings, and includes a v6-to-v7 migration for existing receipt links. It remains under review.
 
 ## Known limitations
 
