@@ -2085,7 +2085,9 @@ class LedgerRepository {
         totalCents: invoice['total_cents']! as int,
         paidCents: paymentRows.single['paid_cents']! as int,
         isReturned: invoice['returned_at'] != null,
-        returnedCents: paymentRows.single['returned_cents']! as int,
+        returnedCents: invoice['returned_at'] != null
+            ? invoice['total_cents']! as int
+            : paymentRows.single['returned_cents']! as int,
         lines: lineRows
             .map((row) => InvoicePrintLine(
                   description: row['description']! as String,
@@ -2430,26 +2432,16 @@ class LedgerRepository {
         return false;
       }
 
-      linesNetRevenue = _checkedSum(
-        linesNetRevenue,
-        lineNet,
-        'Invoice return amount exceeds the supported range.',
-      );
-      linesTax = _checkedSum(
-        linesTax,
-        lineTax,
-        'Invoice return amount exceeds the supported range.',
-      );
-      linesValue = _checkedSum(
-        linesValue,
-        lineValue,
-        'Invoice return amount exceeds the supported range.',
-      );
-      costTotal = _checkedSum(
-        costTotal,
-        lineCost,
-        'Invoice return cost exceeds the supported range.',
-      );
+      if (linesNetRevenue > maxSignedInt - lineNet ||
+          linesTax > maxSignedInt - lineTax ||
+          linesValue > maxSignedInt - lineValue ||
+          costTotal > maxSignedInt - lineCost) {
+        return false;
+      }
+      linesNetRevenue += lineNet;
+      linesTax += lineTax;
+      linesValue += lineValue;
+      costTotal += lineCost;
       movementsExpected.add((
         productId: productId,
         quantity: quantity,
