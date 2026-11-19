@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../data/ledger_repository.dart';
@@ -34,6 +35,7 @@ class PointOfSalePage extends StatefulWidget {
 
 class _PointOfSalePageState extends State<PointOfSalePage> {
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode(debugLabel: 'POS product search');
   final Map<String, PosCartLine> _cart = {};
   Timer? _searchDebounce;
   ProductPage? _productPage;
@@ -65,11 +67,15 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
   void dispose() {
     _searchDebounce?.cancel();
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => Column(
+  Widget build(BuildContext context) => Focus(
+        autofocus: true,
+        onKeyEvent: _handlePosKeyboardShortcuts,
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(tr(context, 'pointOfSale'), style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800)),
@@ -77,6 +83,12 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
           Text(
             tr(context, 'posSubtitle'),
             style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          Text(
+            tr(context, 'posKeyboardShortcuts'),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
           ),
           const SizedBox(height: 16),
           LayoutBuilder(
@@ -102,7 +114,26 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
             },
           ),
         ],
+        ),
       );
+
+  KeyEventResult _handlePosKeyboardShortcuts(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.f2) {
+      _searchFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.f4) {
+      if (_cart.isNotEmpty && !_checkingOut && _cartStockAvailable) {
+        unawaited(_checkout());
+      }
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
 
   Widget _catalogPanel() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -110,6 +141,7 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
           TextField(
             key: const Key('pos-product-search'),
             controller: _searchController,
+            focusNode: _searchFocusNode,
             textInputAction: TextInputAction.search,
             onSubmitted: (value) => unawaited(_lookupBarcode(value)),
             onChanged: (_) {

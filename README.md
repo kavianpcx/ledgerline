@@ -20,13 +20,13 @@ PR [#2](https://github.com/kavianpcx/ledgerline/pull/2) restored permanent left-
 
 ## Current source and development work
 
-PRs #3 through #13 are merged into `main`. PR #13's merge commit is `69ccc144c526dd4a3d66d8858c26ef17b256e327`; [PR workflow run 44464075883](https://github.com/kavianpcx/ledgerline/actions/runs/44464075883) passed analysis, all ten test suites, the Windows release build, installer packaging, and UI evidence capture. Its post-merge [run 44465620324](https://github.com/kavianpcx/ledgerline/actions/runs/44465620324) also passed analysis, all ten test suites, the Windows release build, installer packaging, and UI evidence capture. The screenshots were captured but not manually pixel-reviewed, so visual acceptance remains open.
+PRs #3 through #14 are merged into `main`. PR #14's merge commit is `268b9e6918ce40eb41f4f1a1982203998ff9059b`; [PR workflow run 44468078824](https://github.com/kavianpcx/ledgerline/actions/runs/44468078824) passed analysis, all ten test suites, the Windows release build, installer packaging, and UI evidence capture. Post-merge [run 44469710895](https://github.com/kavianpcx/ledgerline/actions/runs/44469710895) has passed analysis and all ten test suites; its Windows job is still running. Screenshots were captured but not manually pixel-reviewed, so visual acceptance remains open.
 
 The POS supports split cash and bank-transfer tenders, invoice payment history, receipt-to-journal reconciliation, a saved default tax rate, invoice discounts, and full-invoice returns with stock and ledger reversals. Schema v7 links older receipts only when the journal match is exact; unmatched history remains flagged for review. These changes are not part of the published Windows release. Partial-line returns remain open.
 
 ## Known limitations
 
-Ledgerline is not production-ready. The Android application, secure roles and authentication, multi-device synchronization, complete multi-currency accounting, restaurant table/kitchen workflows, partial-line returns, printable invoices and thermal receipts, POS shortcuts and customer records, XLSX/DOCX/PDF import, encrypted backups, payroll/tax rules, market data, and a complete updater remain unfinished. Product photos and curated icons are in `main`; reviewed XLSX product import is being implemented in PR #14. The product requirements stay active; see the audit for risks and implementation status.
+Ledgerline is not production-ready. The Android application, secure roles and authentication, multi-device synchronization, complete multi-currency accounting, restaurant table/kitchen workflows, partial-line returns, printable invoices and thermal receipts, customer records, DOCX/PDF parsing with structured OCR, encrypted backups, payroll/tax rules, market data, and a complete updater remain unfinished. POS F2/F4 shortcuts are proposed in PR #15, pending CI. Product photos, curated icons, and reviewed XLSX product import are in `main`. The product requirements stay active; see the audit for risks and implementation status.
 
 ## Install the verified Windows release
 
@@ -48,7 +48,7 @@ The Windows Actions workflow builds and packages the application, runs automated
 
 ## Local data, OCR, and updates
 
-Ledgerline stores its SQLite database in the operating system's application-support directory. Local business data remains on the device. Smart Import supports reviewed CSV product catalogs and offline image-to-text OCR; XLSX product catalog review is under development in PR #14. Extracted OCR text requires user review and is not automatically posted to the ledger.
+Ledgerline stores its SQLite database in the operating system's application-support directory. Local business data remains on the device. Smart Import supports reviewed CSV and XLSX product catalogs and offline image-to-text OCR. DOCX/PDF parsing and structured OCR extraction remain open. Extracted OCR text requires user review and is not automatically posted to the ledger.
 
 The update flow can discover GitHub Releases and check the published asset digest before offering the installer. It is not a complete standalone updater: publisher signature verification, genuine download progress and cancellation, install progress, rollback, and an older-to-newer end-to-end test are not implemented.
 
