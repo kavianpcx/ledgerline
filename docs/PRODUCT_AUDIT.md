@@ -4,9 +4,9 @@
 
 This audit compares the current GitHub source with docs/PRODUCT_SPECIFICATION.md and distinguishes merged code from remaining work.
 
-PR #15 was merged as `416b98a2c28984a87e737f959dd239b220f3bed4`. [PR workflow run 44471741999](https://github.com/kavianpcx/ledgerline/actions/runs/44471741999) passed analysis, all ten test suites, Windows release packaging, installer packaging, and UI evidence capture. Post-merge [run 44473357416](https://github.com/kavianpcx/ledgerline/actions/runs/44473357416) passed analysis, all ten test suites, Windows release packaging, installer packaging, and UI evidence capture. The screenshots were captured but not manually reviewed.
+PR #16 was merged as `c55e1752ba068e9ae89ad8fd08f02b88952851e1`. [PR workflow run 44475420853](https://github.com/kavianpcx/ledgerline/actions/runs/44475420853) passed analysis, all ten test suites, Windows release packaging, installer packaging, and UI evidence capture. Post-merge [run 44476927408](https://github.com/kavianpcx/ledgerline/actions/runs/44476927408) passed all checks. The screenshots were captured but not manually reviewed.
 
-PR #2 through #15 provide Windows sidebar repair, currency safeguards, editable and paginated catalog, reviewed CSV/XLSX import, transactional POS, barcode lookup, partial and split receipts, invoice payment history and reconciliation, configurable default sales tax, invoice discounts, full-invoice returns, product images/icons, and F2/F4 POS shortcuts. The v7 migration links existing manual payments only when date, amount, method, and invoice description match; unmatched receipts remain flagged for review. Schema v8 stores discounts on new invoices and migrates older invoices with a zero discount. Schema v9 records full-invoice returns and customer-return stock movements. Schema v10 adds built-in product icons and optional product-image BLOBs.
+PR #2 through #16 provide Windows sidebar repair, currency safeguards, editable and paginated catalog, reviewed CSV/XLSX import, transactional POS, barcode lookup, partial and split receipts, invoice payment history and reconciliation, configurable default sales tax, invoice discounts, full-invoice returns, product images/icons, F2/F4 POS shortcuts, and recent-invoice customer selection. The v7 migration links existing manual payments only when date, amount, method, and invoice description match; unmatched receipts remain flagged for review. Schema v8 stores discounts on new invoices and migrates older invoices with a zero discount. Schema v9 records full-invoice returns and customer-return stock movements. Schema v10 adds built-in product icons and optional product-image BLOBs.
 
 ## What works on main
 
@@ -15,18 +15,15 @@ PR #2 through #15 provide Windows sidebar repair, currency safeguards, editable 
 - Integer minor-unit accounting, confirmed/locked base currency, balanced journals, invoice sales/payments, and opening-inventory posting. Accounting remains limited to one base currency.
 - Editable product records with indexed database search, sorting, and pagination at 10/25/50/100 rows per page.
 - Reviewed CSV and XLSX product import with mapping, validation, duplicate checks, and atomic catalog/opening-inventory posting. Product images and built-in icons are also supported on main.
-- Basic retail POS with persisted cart, price/stock revalidation, exact barcode lookup from keyboard input and Enter, F2/F4 keyboard shortcuts, cash or bank-transfer payments including partial receipts and split tenders, on-account invoices, and atomic sale/inventory/journal/payment postings. Full-invoice returns refund collected payments, cancel remaining receivables, restore stock, and reverse journal postings transactionally.
+- Basic retail POS with persisted cart, price/stock revalidation, exact barcode lookup from keyboard input and Enter, F2/F4 keyboard shortcuts, searchable suggestions from prior invoice customer names, cash or bank-transfer payments including partial receipts and split tenders, on-account invoices, and atomic sale/inventory/journal/payment postings. Full-invoice returns refund collected payments, cancel remaining receivables, restore stock, and reverse journal postings transactionally.
 - Append-only stock history for opening balances, CSV imports, adjustments, sales, and full-invoice customer returns. Existing quantities migrate as labeled balance-forward records; earlier events are not reconstructed.
 - English and Persian UI, light/dark themes, SQLite backup/restore with integrity checks, offline Tesseract OCR text extraction, and partial GitHub release discovery.
 
 The tagged v0.5.1-beta.1 release predates the current currency, catalog, import, and POS changes. The verified distribution remains Windows-only.
 
-## PR #16 POS recent-customer selection candidate under validation
-
-The checkout field offers searchable suggestions from distinct, recent invoice customer names while keeping free-form names available. A bounded repository query supplies the suggestions; there is no customer profile table or new schema migration. Widget coverage selects a suggested name, and repository coverage checks deduplication, recency ordering, limits, and invalid bounds. CI verification is pending.
 ## POS gaps remaining
 
-Full-invoice refunds/returns are implemented on main; partial-line returns, invoice and thermal receipts, customer records, terminals, and restaurant workflows remain incomplete. F2/F4 POS shortcuts are merged into main. Searchable suggestions for prior invoice customers are proposed in PR #16 pending CI. Tax and invoice discounts are also merged into main.
+Full-invoice refunds/returns, F2/F4 POS shortcuts, and searchable suggestions from prior invoice customer names are implemented on main. Partial-line returns, invoice and thermal receipts, persistent customer records, terminals, and restaurant workflows remain incomplete. Tax and invoice discounts are also merged into main.
 
 ## Incomplete product functionality
 
