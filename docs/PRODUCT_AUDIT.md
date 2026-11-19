@@ -4,9 +4,9 @@
 
 This audit compares the current GitHub source with docs/PRODUCT_SPECIFICATION.md and distinguishes merged code from work under review.
 
-Current main is b37ece300e3d35d2231c3aa2049077c583d098f3. PRs #2 through #7 are merged: Windows sidebar repair, currency safeguards, editable and paginated catalog, reviewed product CSV import, transactional POS with stock history, and exact keyboard-wedge barcode lookup. PR #7's [workflow run 44427000553](https://github.com/kavianpcx/ledgerline/actions/runs/44427000553) passed analyzer, all ten test suites, Windows release build, installer packaging, screenshot capture, and artifact upload. Manual review found blank application windows in the screenshot evidence; visual acceptance is not established.
+At this snapshot, `main` is `990e04a2ae015c1835b64fc28b230ed915802cdc`. PRs #2 through #8 are merged: Windows sidebar repair, currency safeguards, editable and paginated catalog, reviewed CSV import, transactional POS, barcode lookup, and partial payment entry. The post-merge [workflow run 44441447260](https://github.com/kavianpcx/ledgerline/actions/runs/44441447260) passed analysis, all ten test suites, Windows release packaging, and UI evidence capture. Its screenshot artifact was not manually reviewed.
 
-Open PR #8 adds partial payment entry to the POS checkout. Its cashier-facing amount field, integer minor-unit parsing, remaining-balance display, and widget/accounting tests have not yet passed CI.
+PR #9, `feature/pos-split-tenders`, adds multiple tender amounts in one checkout, cash/bank account routing, and transactionally recorded tender rows. The branch includes accounting, overpayment, rollback, and widget tests. [Workflow run 44444262821](https://github.com/kavianpcx/ledgerline/actions/runs/44444262821) passed analyzer, all ten test suites, Windows release packaging, and UI evidence capture. The screenshot artifact was not manually reviewed; visual acceptance remains open.
 
 ## What works on main
 
@@ -15,7 +15,7 @@ Open PR #8 adds partial payment entry to the POS checkout. Its cashier-facing am
 - Integer minor-unit accounting, confirmed/locked base currency, balanced journals, invoice sales/payments, and opening-inventory posting. Accounting remains limited to one base currency.
 - Editable product records with indexed database search, sorting, and pagination at 10/25/50/100 rows per page.
 - Reviewed CSV product import with mapping, validation, duplicate checks, and atomic catalog/opening-inventory posting.
-- Basic retail POS with persisted cart, price/stock revalidation, exact barcode lookup from keyboard input and Enter, cash or bank-transfer payments, on-account invoices, and atomic sale/inventory/journal/payment postings.
+- Basic retail POS with persisted cart, price/stock revalidation, exact barcode lookup from keyboard input and Enter, cash or bank-transfer payments including partial receipts, on-account invoices, and atomic sale/inventory/journal/payment postings.
 - Append-only stock history for opening balances, CSV imports, adjustments, and sales. Existing quantities migrate as labeled balance-forward records; earlier events are not reconstructed.
 - English and Persian UI, light/dark themes, SQLite backup/restore with integrity checks, offline Tesseract OCR text extraction, and partial GitHub release discovery.
 
@@ -23,9 +23,9 @@ The tagged v0.5.1-beta.1 release predates the current currency, catalog, import,
 
 ## POS work under review
 
-PR #8 exposes the transactional invoice payment amount for cashier entry. Tests cover overpayment rejection, remaining-balance display, partial receipt posting, receivables, and the accounting equation.
+PR #9 adds POS split tenders and keeps each tender record and matching cash or bank journal posting inside the invoice transaction. Tests cover account routing, paid status, overpayment rejection, balanced accounting, and rollback when a later tender fails. PR #9 CI is still running.
 
-Split tenders, payment history/reconciliation, refunds/returns, receipts/printing, shortcuts, configurable tax/discount, customer records, terminals, and restaurant workflows remain incomplete. PR #8 does not test split tender behavior.
+Payment history/reconciliation, refunds/returns, invoice and thermal receipts, keyboard shortcuts, configurable tax/discount, customer records, terminals, and restaurant workflows remain incomplete.
 
 ## Incomplete product functionality
 
@@ -39,11 +39,11 @@ Split tenders, payment history/reconciliation, refunds/returns, receipts/printin
 
 ## Risks and verification limits
 
-CI proves only the checks included in a workflow. Manual review of the PR #6 and PR #7 Windows UI artifacts found blank application windows; capture success alone is not visual acceptance. High-DPI, resize-edge, drag, Snap, Android hardware, and physical-device camera behavior remain unverified. The application is not ready for sensitive multi-user or multi-device production use.
+CI proves only the checks included in a workflow. Manual review of the PR #6 and PR #7 Windows UI artifacts found blank application windows; the PR #8 screenshot artifact has not been manually reviewed. Capture success alone is not visual acceptance. The snapshot query loads the full product catalog while recent entries and invoices are capped at 200; large-data dashboard/report pagination and aggregation still need work. High-DPI, resize-edge, drag, Snap, Android hardware, and physical-device camera behavior remain unverified. The application is not ready for sensitive multi-user or multi-device production use.
 
 ## Next implementation order
 
-1. Merge partial payment after CI; then add split tenders, payment history/reconciliation, returns, and receipts.
+1. Complete split tender verification, then add payment history/reconciliation, returns, and receipts.
 2. Add inventory purchasing, movement/accounting reconciliation, returns, and warehouse support.
 3. Add service-layer permissions, protected management, shifts, and idempotent close.
 4. Implement Android workflows and secure synchronization with explicit conflict and duplicate-posting rules.
