@@ -3053,7 +3053,7 @@ class _InvoiceReturnDialogState extends State<_InvoiceReturnDialog> {
                           ),
                         );
                       },
-                child: Text(tr(context, 'returnInvoice')),
+                child: Text(tr(context, 'returnSelectedItems')),
               ),
             ],
           );
@@ -3224,7 +3224,7 @@ class _InvoicePaymentHistoryDialogState
                       ListTile(
                         contentPadding: EdgeInsets.zero,
                         title: Text(
-                          tr(context, 'partialReturnValue') +
+                          tr(context, 'partialReturnRecordedValue') +
                               ': ' +
                               _money(
                                 partialReturn.returnValueCents,
