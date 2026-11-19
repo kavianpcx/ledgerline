@@ -383,7 +383,10 @@ void main() {
     await tester.ensureVisible(secondAmount);
     await tester.enterText(secondAmount, '6.00');
     await tester.pump();
-    expect(find.text('USD 0.00'), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('pos-balance-due'))).data,
+      'USD 0.00',
+    );
     await tester.enterText(secondAmount, '7.00');
     await tester.pump();
     await tester.tap(find.byKey(const Key('pos-submit-checkout')));
