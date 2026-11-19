@@ -348,6 +348,11 @@ class InvoicePrintService {
 
             bold: true,
           ),
+          if (invoice.returnedCents > 0)
+            _summaryRow(
+              _text(isPersian, 'returnedAmount'),
+              '-${_money(invoice.returnedCents, currencyCode)}',
+            ),
           _summaryRow(
             _text(isPersian, 'paid'),
             _money(invoice.paidCents, currencyCode),
@@ -440,6 +445,7 @@ class InvoicePrintService {
       'tax': 'Tax',
       'total': 'Total',
       'paid': 'Paid',
+      'returnedAmount': 'Returned',
       'balanceDue': 'Balance due',
       'returned': 'RETURNED',
       'footer': 'Thank you for your business.',
@@ -461,6 +467,7 @@ class InvoicePrintService {
       'tax': 'مالیات',
       'total': 'جمع کل',
       'paid': 'پرداخت‌شده',
+      'returnedAmount': 'مرجوعی',
       'balanceDue': 'مانده قابل پرداخت',
       'returned': 'مرجوع‌شده',
       'footer': 'از خرید شما سپاسگزاریم.',
