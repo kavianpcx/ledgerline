@@ -398,6 +398,7 @@ jobs:
             $imagePath = Join-Path $evidenceDirectory ($scenario + '.png')
             Save-WindowEvidence -WindowHandle $process.MainWindowHandle -ImagePath $imagePath -Scenario $scenario
             if ($scenario -eq 'titlebar') {
+              try {
               [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
               Start-Sleep -Milliseconds 500
               if ([LedgerlineWindowTest]::GetForegroundWindow() -ne $process.MainWindowHandle) { throw 'Could not activate Ledgerline for keyboard shortcut verification.' }
@@ -412,7 +413,12 @@ jobs:
               if (-not [LedgerlineWindowTest]::IsIconic($process.MainWindowHandle)) { throw 'Ctrl+Shift+M did not minimize the Ledgerline window.' }
               [LedgerlineWindowTest]::ShowWindow($process.MainWindowHandle, 9) | Out-Null
               Start-Sleep -Seconds 1
-              if ([LedgerlineWindowTest]::IsIconic($process.MainWindowHandle)) { throw 'The Ledgerline window did not restore after minimizing.' }
+              if ([LedgerlineWindowTest]::IsIconic($process.MainWindowHandle)) { throw 'The Ledgerline window did not restore after minimizing.' }              } catch {
+                $verificationError = 'titlebar keyboard shortcuts: ' + $_.Exception.Message
+                $script:uiVerificationFailures.Add($verificationError)
+                Add-Content -Path $evidenceReport -Value ('verification_error=' + $verificationError) -Encoding utf8
+                Write-Host ('UI_TEXT_ASSERTION_FAILED ' + $verificationError)
+              }
             }
             $process.CloseMainWindow() | Out-Null
             if (-not $process.WaitForExit(10000)) { throw "Ledgerline did not close cleanly after capturing $scenario." }
