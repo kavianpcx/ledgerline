@@ -341,6 +341,8 @@ void main() {
     await tester.enterText(secondAmount, '6.00');
     await tester.pump();
     expect(find.text('USD 0.00'), findsOneWidget);
+    await tester.enterText(secondAmount, '7.00');
+    await tester.pump();
     await tester.tap(find.byKey(const Key('pos-submit-checkout')));
     await tester.pump();
     expect(
