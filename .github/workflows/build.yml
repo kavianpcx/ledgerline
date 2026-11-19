@@ -415,11 +415,13 @@ jobs:
           name: ledgerline-windows-installer
           path: installer/output/ledgerline-windows-setup.exe
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - name: Upload UI evidence, including failed captures
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: ledgerline-ui-evidence
           path: ui-evidence/*
-          if-no-files-found: error
+          if-no-files-found: warn
 
   # Public publishing intentionally requires an explicit marker on a main-branch push.
   # Pull requests, feature branches, and manual builds only produce reviewable artifacts.
