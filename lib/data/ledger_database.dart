@@ -392,6 +392,9 @@ class LedgerDatabase {
     await db.execute(
       'CREATE INDEX invoice_payments_by_invoice ON invoice_payments(invoice_id, payment_date DESC)',
     );
+    await db.execute(
+      'CREATE UNIQUE INDEX invoice_payments_by_journal_entry ON invoice_payments(journal_entry_id) WHERE journal_entry_id IS NOT NULL',
+    );
     await db.execute('''
       INSERT INTO invoice_payments (
         id, invoice_id, payment_date, amount_cents, created_at
