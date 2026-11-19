@@ -222,6 +222,7 @@ jobs:
           }
           $evidenceReport = Join-Path $evidenceDirectory 'capture-verification.txt'
           Set-Content -Path $evidenceReport -Value ('commit=' + $env:GITHUB_SHA) -Encoding utf8
+          $script:uiVerificationFailures = [System.Collections.Generic.List[string]]::new()
 
           function Assert-VisibleUiText {
             param([string]$ImagePath, [string]$Scenario)
@@ -306,7 +307,14 @@ jobs:
               if ($null -ne $graphics) { $graphics.Dispose() }
               $bitmap.Dispose()
             }
-            Assert-VisibleUiText -ImagePath $ImagePath -Scenario $Scenario
+            try {
+              Assert-VisibleUiText -ImagePath $ImagePath -Scenario $Scenario
+            } catch {
+              $verificationError = $Scenario + ': ' + $_.Exception.Message
+              $script:uiVerificationFailures.Add($verificationError)
+              Add-Content -Path $evidenceReport -Value ('verification_error=' + $verificationError) -Encoding utf8
+              Write-Host ('UI_TEXT_ASSERTION_FAILED ' + $verificationError)
+            }
           }
 
           $smokeInstallDirectory = Join-Path $env:RUNNER_TEMP 'LedgerlineInstallerSmoke'
@@ -410,6 +418,65 @@ jobs:
             if (-not $process.WaitForExit(10000)) { throw "Ledgerline did not close cleanly after capturing $scenario." }
             $process.Dispose()
           }
+          $previewFiles = @(Get-ChildItem -LiteralPath $evidenceDirectory -Filter '*.png' | Sort-Object Name)
+          if ($previewFiles.Count -gt 0) {
+            $columns = 3
+            $cellWidth = 480
+            $cellHeight = 300
+            $rows = [Math]::Ceiling($previewFiles.Count / [double]$columns)
+            $contactSheet = [System.Drawing.Bitmap]::new($columns * $cellWidth, [int]($rows * $cellHeight))
+            $sheetGraphics = [System.Drawing.Graphics]::FromImage($contactSheet)
+            $labelFont = [System.Drawing.Font]::new('Arial', 12, [System.Drawing.FontStyle]::Bold)
+            try {
+              $sheetGraphics.Clear([System.Drawing.Color]::White)
+              foreach ($index in 0..($previewFiles.Count - 1)) {
+                $previewImage = [System.Drawing.Bitmap]::new($previewFiles[$index].FullName)
+                try {
+                  $column = $index % $columns
+                  $row = [Math]::Floor($index / [double]$columns)
+                  $cellX = $column * $cellWidth
+                  $cellY = $row * $cellHeight
+                  $sheetGraphics.DrawString($previewFiles[$index].BaseName, $labelFont, [System.Drawing.Brushes]::Black, [float]($cellX + 8), [float]($cellY + 5))
+                  $maxWidth = $cellWidth - 20
+                  $maxHeight = $cellHeight - 42
+                  $scale = [Math]::Min($maxWidth / [double]$previewImage.Width, $maxHeight / [double]$previewImage.Height)
+                  $targetWidth = [int][Math]::Round($previewImage.Width * $scale)
+                  $targetHeight = [int][Math]::Round($previewImage.Height * $scale)
+                  $targetX = $cellX + [int](($cellWidth - $targetWidth) / 2)
+                  $targetY = $cellY + 30 + [int](($maxHeight - $targetHeight) / 2)
+                  $sheetGraphics.DrawImage($previewImage, $targetX, $targetY, $targetWidth, $targetHeight)
+                } finally {
+                  $previewImage.Dispose()
+                }
+              }
+              $contactPath = Join-Path $evidenceDirectory 'contact-sheet.jpg'
+              $jpegCodec = @([System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' })[0]
+              if ($null -eq $jpegCodec) { throw 'The JPEG encoder is unavailable for the UI evidence contact sheet.' }
+              $encoderParameters = [System.Drawing.Imaging.EncoderParameters]::new(1)
+              $encoderParameters.Param[0] = [System.Drawing.Imaging.EncoderParameter]::new([System.Drawing.Imaging.Encoder]::Quality, [long]65)
+              try {
+                $contactSheet.Save($contactPath, $jpegCodec, $encoderParameters)
+              } finally {
+                $encoderParameters.Dispose()
+              }
+            } finally {
+              $labelFont.Dispose()
+              $sheetGraphics.Dispose()
+              $contactSheet.Dispose()
+            }
+            $previewBase64 = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($contactPath))
+            Write-Host 'UI_EVIDENCE_PREVIEW_BEGIN'
+            for ($offset = 0; $offset -lt $previewBase64.Length; $offset += 30000) {
+              $chunkLength = [Math]::Min(30000, $previewBase64.Length - $offset)
+              Write-Host ('UI_EVIDENCE_PREVIEW_CHUNK:' + $previewBase64.Substring($offset, $chunkLength))
+            }
+            Write-Host 'UI_EVIDENCE_PREVIEW_END'
+          }
+
+          if ($script:uiVerificationFailures.Count -gt 0) {
+            throw ('Visible text verification failed for ' + $script:uiVerificationFailures.Count + ' screen(s): ' + ($script:uiVerificationFailures -join ' || '))
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: ledgerline-windows-installer
