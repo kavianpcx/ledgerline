@@ -12,7 +12,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 10,
+        version: 11,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -28,7 +28,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       inMemoryDatabasePath,
       options: OpenDatabaseOptions(
-        version: 10,
+        version: 11,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -78,6 +78,7 @@ class LedgerDatabase {
     await _createProductInvoiceAndSettingsTables(db);
     await _createInvoicePaymentsTable(db);
     await _createInvoiceReturnsTable(db);
+    await _createInvoicePartialReturnsTables(db);
     await _upgradeProductsToV4(db);
     await _upgradeProductsToV10(db);
     await _createStockMovementsTable(db);
@@ -114,6 +115,9 @@ class LedgerDatabase {
     }
     if (oldVersion < 10) {
       await _upgradeProductsToV10(db);
+    }
+    if (oldVersion < 11) {
+      await _createInvoicePartialReturnsTables(db);
     }
   }
 
@@ -361,6 +365,56 @@ class LedgerDatabase {
     ''');
     await db.execute(
       'CREATE INDEX IF NOT EXISTS invoice_returns_by_date ON invoice_returns(return_date DESC)',
+    );
+  }
+
+  static Future<void> _createInvoicePartialReturnsTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS invoice_partial_returns (
+        id TEXT PRIMARY KEY,
+        invoice_id TEXT NOT NULL REFERENCES sales_invoices(id),
+        return_date TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        net_revenue_cents INTEGER NOT NULL CHECK (net_revenue_cents >= 0),
+        tax_cents INTEGER NOT NULL CHECK (tax_cents >= 0),
+        return_value_cents INTEGER NOT NULL CHECK (
+          return_value_cents >= 0 AND
+          return_value_cents = net_revenue_cents + tax_cents
+        ),
+        refund_amount_cents INTEGER NOT NULL CHECK (refund_amount_cents >= 0),
+        receivable_credit_cents INTEGER NOT NULL CHECK (receivable_credit_cents >= 0),
+        refund_method TEXT NOT NULL CHECK (refund_method IN ('cash', 'bank_transfer')),
+        journal_entry_id TEXT UNIQUE REFERENCES journal_entries(id),
+        created_at TEXT NOT NULL,
+        CHECK (return_value_cents = refund_amount_cents + receivable_credit_cents)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS invoice_partial_returns_by_invoice_date '
+      'ON invoice_partial_returns(invoice_id, return_date DESC, id)',
+    );
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS invoice_partial_return_lines (
+        return_id TEXT NOT NULL REFERENCES invoice_partial_returns(id) ON DELETE CASCADE,
+        invoice_line_id INTEGER NOT NULL REFERENCES invoice_lines(id) ON DELETE RESTRICT,
+        product_id TEXT NOT NULL,
+        product_sku TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        quantity INTEGER NOT NULL CHECK (quantity > 0),
+        net_revenue_cents INTEGER NOT NULL CHECK (net_revenue_cents >= 0),
+        tax_cents INTEGER NOT NULL CHECK (tax_cents >= 0),
+        line_value_cents INTEGER NOT NULL CHECK (
+          line_value_cents >= 0 AND
+          line_value_cents = net_revenue_cents + tax_cents
+        ),
+        unit_cost_cents INTEGER NOT NULL CHECK (unit_cost_cents >= 0),
+        cost_total_cents INTEGER NOT NULL CHECK (cost_total_cents >= 0),
+        PRIMARY KEY (return_id, invoice_line_id)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS invoice_partial_return_lines_by_invoice_line '
+      'ON invoice_partial_return_lines(invoice_line_id, return_id)',
     );
   }
 
