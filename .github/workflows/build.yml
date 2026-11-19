@@ -230,15 +230,15 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Tesseract could not inspect $Scenario. Output: $recognized" }
             $expected = @(
               switch ($Scenario) {
-                'titlebar' { 'Ledgerline'; 'Your books' }
-                'windows-sidebar-wide' { 'Ledgerline'; 'Products'; 'Your books' }
-                'windows-sidebar-medium' { 'Ledgerline'; 'Your books' }
-                'windows-sidebar-narrow' { 'Ledgerline'; 'Your books' }
-                'settings-light' { 'Ledgerline'; 'Settings'; 'General' }
-                'settings-dark' { 'Ledgerline'; 'Settings'; 'Appearance'; 'Dark mode' }
-                'settings-fa' { 'Ledgerline' }
-                'currency-popup' { 'Ledgerline'; 'Settings'; 'Search currencies'; 'US Dollar' }
-                'installer-launch' { 'Ledgerline'; 'Your books' }
+                'titlebar' { 'Your books'; 'Total assets' }
+                'windows-sidebar-wide' { 'Products'; 'Your books' }
+                'windows-sidebar-medium' { 'Your books'; 'Total assets' }
+                'windows-sidebar-narrow' { 'Your books'; 'Total assets' }
+                'settings-light' { 'Settings'; 'General' }
+                'settings-dark' { 'Settings'; 'Appearance'; 'Dark mode' }
+                'settings-fa' { }
+                'currency-popup' { 'Settings'; 'Search currencies'; 'US Dollar' }
+                'installer-launch' { 'Your books'; 'Total assets' }
                 default { throw "No visible-text expectations are defined for $Scenario." }
               }
             )
@@ -249,6 +249,36 @@ jobs:
             }
             if ($Scenario -eq 'settings-fa' -and $recognized -notmatch 'زبان|منطقه') {
               throw "Persian settings labels were missing from $Scenario. OCR output: $recognized"
+            }
+            if ($Scenario -in @('titlebar', 'installer-launch')) {
+              $titleImage = [System.Drawing.Bitmap]::new($ImagePath)
+              $scaledTitle = $null
+              $titleGraphics = $null
+              try {
+                $titleHeight = [Math]::Min(100, $titleImage.Height)
+                $scaleFactor = 3
+                $scaledTitle = [System.Drawing.Bitmap]::new($titleImage.Width * $scaleFactor, $titleHeight * $scaleFactor)
+                $titleGraphics = [System.Drawing.Graphics]::FromImage($scaledTitle)
+                $titleGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                $titleGraphics.DrawImage(
+                  $titleImage,
+                  [System.Drawing.Rectangle]::new(0, 0, $scaledTitle.Width, $scaledTitle.Height),
+                  [System.Drawing.Rectangle]::new(0, 0, $titleImage.Width, $titleHeight),
+                  [System.Drawing.GraphicsUnit]::Pixel
+                )
+                $titleImagePath = Join-Path $env:RUNNER_TEMP 'ledgerline-titlebar-upscaled.png'
+                $scaledTitle.Save($titleImagePath, [System.Drawing.Imaging.ImageFormat]::Png)
+              } finally {
+                if ($null -ne $titleGraphics) { $titleGraphics.Dispose() }
+                if ($null -ne $scaledTitle) { $scaledTitle.Dispose() }
+                $titleImage.Dispose()
+              }
+              $titleText = (& $tesseractPath $titleImagePath stdout --tessdata-dir $tessdataDirectory -l eng --psm 6 2>&1) -join [Environment]::NewLine
+              if ($LASTEXITCODE -ne 0 -or $titleText -notmatch 'Ledgerline') {
+                throw "Ledgerline title text was missing from the upscaled $Scenario title strip. OCR output: $titleText"
+              }
+              Add-Content -Path $evidenceReport -Value ("titlebar=" + $Scenario + "; recognized=" + ($titleText -replace '[\r\n]+', ' ')) -Encoding utf8
+              Write-Host ("Verified titlebar text in " + $Scenario + ": " + ($titleText -replace '[\r\n]+', ' '))
             }
             Add-Content -Path $evidenceReport -Value ("scenario=" + $Scenario + "; expected=" + ($expected -join '|') + "; recognized=" + ($recognized -replace '[\r\n]+', ' ')) -Encoding utf8
             Write-Host ("Verified visible text in " + $Scenario + ": " + ($recognized -replace '[\r\n]+', ' '))
