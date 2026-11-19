@@ -12,7 +12,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 7,
+        version: 8,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -28,7 +28,7 @@ class LedgerDatabase {
     final database = await databaseFactoryFfi.openDatabase(
       inMemoryDatabasePath,
       options: OpenDatabaseOptions(
-        version: 7,
+        version: 8,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -104,8 +104,24 @@ class LedgerDatabase {
     if (oldVersion < 7) {
       await _upgradeInvoicePaymentsToV7(db);
     }
+    if (oldVersion < 8) {
+      await _upgradeSalesInvoicesToV8(db);
+    }
   }
 
+
+  static Future<void> _upgradeSalesInvoicesToV8(Database db) async {
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sales_invoices'",
+    );
+    if (tables.isEmpty) return;
+    final columns = await db.rawQuery('PRAGMA table_info(sales_invoices)');
+    if (!columns.any((row) => row['name'] == 'discount_cents')) {
+      await db.execute(
+        'ALTER TABLE sales_invoices ADD COLUMN discount_cents INTEGER NOT NULL DEFAULT 0 CHECK (discount_cents >= 0 AND discount_cents <= subtotal_cents)',
+      );
+    }
+  }
 
   static Future<void> _upgradeInvoicePaymentsToV6(Database db) async {
     final paymentTables = await db.rawQuery(
@@ -349,6 +365,7 @@ class LedgerDatabase {
         status TEXT NOT NULL CHECK (status IN ('issued', 'paid', 'void')),
         subtotal_cents INTEGER NOT NULL CHECK (subtotal_cents >= 0),
         tax_cents INTEGER NOT NULL CHECK (tax_cents >= 0),
+        discount_cents INTEGER NOT NULL DEFAULT 0 CHECK (discount_cents >= 0 AND discount_cents <= subtotal_cents),
         total_cents INTEGER NOT NULL CHECK (total_cents >= 0),
         created_at TEXT NOT NULL
       )

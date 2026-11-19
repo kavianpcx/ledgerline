@@ -6,6 +6,7 @@ class AppSettings {
     this.currencyCode = 'USD',
     this.accountingCurrencyConfigured = false,
     this.desktopSidebarCollapsed = false,
+    this.defaultTaxRateBasisPoints = 0,
   });
 
   static const defaults = AppSettings(
@@ -19,6 +20,7 @@ class AppSettings {
   final String currencyCode;
   final bool accountingCurrencyConfigured;
   final bool desktopSidebarCollapsed;
+  final int defaultTaxRateBasisPoints;
 
   AppSettings copyWith({
     bool? darkMode,
@@ -27,6 +29,7 @@ class AppSettings {
     String? currencyCode,
     bool? accountingCurrencyConfigured,
     bool? desktopSidebarCollapsed,
+    int? defaultTaxRateBasisPoints,
   }) => AppSettings(
         darkMode: darkMode ?? this.darkMode,
         languageCode: languageCode ?? this.languageCode,
@@ -34,5 +37,6 @@ class AppSettings {
         currencyCode: currencyCode ?? this.currencyCode,
         accountingCurrencyConfigured: accountingCurrencyConfigured ?? this.accountingCurrencyConfigured,
         desktopSidebarCollapsed: desktopSidebarCollapsed ?? this.desktopSidebarCollapsed,
+        defaultTaxRateBasisPoints: defaultTaxRateBasisPoints ?? this.defaultTaxRateBasisPoints,
       );
 }

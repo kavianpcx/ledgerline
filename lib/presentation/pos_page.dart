@@ -17,6 +17,7 @@ class PointOfSalePage extends StatefulWidget {
     required this.onCheckoutCompleted,
     required this.initialCart,
     required this.onCartChanged,
+    this.taxRateBasisPoints = 0,
   });
 
   final LedgerRepository repository;
@@ -25,6 +26,7 @@ class PointOfSalePage extends StatefulWidget {
   final Future<void> Function() onCheckoutCompleted;
   final Map<String, PosCartLine> initialCart;
   final ValueChanged<Map<String, PosCartLine>> onCartChanged;
+  final int taxRateBasisPoints;
 
   @override
   State<PointOfSalePage> createState() => _PointOfSalePageState();
@@ -610,7 +612,7 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
         return;
       }
 
-      final total = _cartTotal;
+      final subtotal = _cartTotal;
       // The modal review step blocks the page below it. Stop animating a
       // checkout spinner behind the dialog while the cashier makes a choice.
       setState(() => _checkingOut = false);
@@ -618,10 +620,12 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
         context: context,
         builder: (context) => _PosCheckoutDialog(
           currencyCode: widget.currencyCode,
-          totalCents: total,
+          subtotalCents: subtotal,
+          taxRateBasisPoints: widget.taxRateBasisPoints,
         ),
       );
       if (request == null || !mounted || _cart.isEmpty) return;
+      final total = request.totalCents;
       final paymentAmountCents = request.payments.fold<int>(
         0,
         (sum, payment) => sum + payment.amountCents,
@@ -632,6 +636,8 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
         InvoiceDraft(
           customerName: request.customerName,
           date: DateTime.now(),
+          discountCents: request.discountCents,
+          taxCents: request.taxCents,
           lines: [
             for (final line in _cart.values)
               InvoiceLineDraft(
@@ -699,10 +705,16 @@ class _PosCheckoutRequest {
   const _PosCheckoutRequest({
     required this.customerName,
     required this.payments,
+    required this.discountCents,
+    required this.taxCents,
+    required this.totalCents,
   });
 
   final String customerName;
   final List<InvoiceTenderDraft> payments;
+  final int discountCents;
+  final int taxCents;
+  final int totalCents;
 }
 
 class _AdditionalPosTender {
@@ -717,11 +729,13 @@ class _AdditionalPosTender {
 class _PosCheckoutDialog extends StatefulWidget {
   const _PosCheckoutDialog({
     required this.currencyCode,
-    required this.totalCents,
+    required this.subtotalCents,
+    required this.taxRateBasisPoints,
   });
 
   final String currencyCode;
-  final int totalCents;
+  final int subtotalCents;
+  final int taxRateBasisPoints;
 
   @override
   State<_PosCheckoutDialog> createState() => _PosCheckoutDialogState();
@@ -733,14 +747,30 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
     text: 'Walk-in customer',
   );
   final TextEditingController _paymentAmount = TextEditingController();
+  final TextEditingController _discountAmount = TextEditingController(text: '0');
   final List<_AdditionalPosTender> _additionalTenders = [];
   bool _collectPaymentNow = true;
   String _paymentMethod = 'cash';
+  int _lastComputedTotalCents = 0;
 
   int? _parseAmount(String value) => CurrencyDefinition.parseMinorUnits(
         value,
         currencyCode: widget.currencyCode,
       );
+
+  int get _discountCents => _parseAmount(_discountAmount.text) ?? 0;
+
+  int get _taxCents {
+    final taxableCents = widget.subtotalCents - _discountCents;
+    if (taxableCents <= 0 || widget.taxRateBasisPoints <= 0) return 0;
+    final quotient = taxableCents ~/ 10000;
+    final remainder = taxableCents % 10000;
+    return quotient * widget.taxRateBasisPoints +
+        (remainder * widget.taxRateBasisPoints + 5000) ~/ 10000;
+  }
+
+  int get _totalCents =>
+      widget.subtotalCents - _discountCents + _taxCents;
 
   int get _displayedPaymentAmountCents {
     if (!_collectPaymentNow) return 0;
@@ -752,14 +782,14 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
     var collected = 0;
     for (final amount in amounts) {
       if (amount == null || amount <= 0) continue;
-      if (amount > widget.totalCents - collected) return widget.totalCents;
+      if (amount > _totalCents - collected) return _totalCents;
       collected += amount;
     }
     return collected;
   }
 
   int get _balanceDueCents =>
-      widget.totalCents - _displayedPaymentAmountCents;
+      _totalCents - _displayedPaymentAmountCents;
 
   TextEditingController _controllerForTender(int index) =>
       index == 0 ? _paymentAmount : _additionalTenders[index - 1].amountController;
@@ -790,12 +820,12 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
       if (otherIndex == index) continue;
       final otherAmount = _parseAmount(controllers[otherIndex].text);
       if (otherAmount == null || otherAmount <= 0) continue;
-      if (otherAmount > widget.totalCents - otherTotal) {
+      if (otherAmount > _totalCents - otherTotal) {
         return tr(context, 'posPaymentAmountExceeds');
       }
       otherTotal += otherAmount;
     }
-    if (amount > widget.totalCents - otherTotal) {
+    if (amount > _totalCents - otherTotal) {
       return tr(context, 'posPaymentAmountExceeds');
     }
     return null;
@@ -814,14 +844,16 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
   @override
   void initState() {
     super.initState();
+    _lastComputedTotalCents = _totalCents;
     _paymentAmount.text = CurrencyDefinition.of(widget.currencyCode)
-        .formatInput(widget.totalCents);
+        .formatInput(_totalCents);
   }
 
   @override
   void dispose() {
     _customerName.dispose();
     _paymentAmount.dispose();
+    _discountAmount.dispose();
     for (final tender in _additionalTenders) {
       tender.dispose();
     }
@@ -920,6 +952,43 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
                         : null,
                   ),
                   const SizedBox(height: 12),
+                  TextFormField(
+                    key: const Key('pos-discount-amount'),
+                    controller: _discountAmount,
+                    keyboardType: TextInputType.numberWithOptions(
+                      decimal: CurrencyDefinition.of(widget.currencyCode)
+                              .minorUnitExponent >
+                          0,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: tr(context, 'discount'),
+                    ),
+                    onChanged: (_) {
+                      final wasFullPayment = _parseAmount(
+                            _paymentAmount.text,
+                          ) ==
+                          _lastComputedTotalCents;
+                      setState(() {
+                        if (wasFullPayment) {
+                          _paymentAmount.text = CurrencyDefinition.of(
+                            widget.currencyCode,
+                          ).formatInput(_totalCents);
+                        }
+                        _lastComputedTotalCents = _totalCents;
+                      });
+                    },
+                    validator: (value) {
+                      final discount = _parseAmount(value ?? '');
+                      if (discount == null || discount < 0) {
+                        return tr(context, 'posDiscountInvalid');
+                      }
+                      if (discount > widget.subtotalCents) {
+                        return tr(context, 'posDiscountExceedsSubtotal');
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
                   CheckboxListTile(
                     key: const Key('pos-collect-payment-now'),
                     value: _collectPaymentNow,
@@ -949,10 +1018,40 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
                   const SizedBox(height: 8),
                   Row(
                     children: [
+                      Expanded(child: Text(tr(context, 'subtotal'))),
+                      Text(
+                        CurrencyDefinition.of(widget.currencyCode)
+                            .formatMinorUnits(widget.subtotalCents),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(child: Text(tr(context, 'discount'))),
+                      Text(
+                        CurrencyDefinition.of(widget.currencyCode)
+                            .formatMinorUnits(_discountCents),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(child: Text(tr(context, 'tax'))),
+                      Text(
+                        CurrencyDefinition.of(widget.currencyCode)
+                            .formatMinorUnits(_taxCents),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
                       Expanded(child: Text(tr(context, 'total'))),
                       Text(
                         CurrencyDefinition.of(widget.currencyCode)
-                            .formatMinorUnits(widget.totalCents),
+                            .formatMinorUnits(_totalCents),
                         style: const TextStyle(fontWeight: FontWeight.w800),
                       ),
                     ],
@@ -1006,6 +1105,9 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
       _PosCheckoutRequest(
         customerName: _customerName.text.trim(),
         payments: payments,
+        discountCents: _discountCents,
+        taxCents: _taxCents,
+        totalCents: _totalCents,
       ),
     );
   }
