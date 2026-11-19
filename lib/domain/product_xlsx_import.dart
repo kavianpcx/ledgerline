@@ -1,5 +1,4 @@
 import 'package:excel/excel.dart';
-import 'package:flutter/painting.dart';
 
 /// Converts the first populated worksheet into CSV for the reviewed catalog flow.
 class ProductXlsxImport {
@@ -70,7 +69,7 @@ class ProductXlsxImport {
     final value = cell?.value;
     if (value == null) return '';
     return switch (value) {
-      TextCellValue(:final value) => value.toPlainText(),
+      TextCellValue(:final value) => value.toString(),
       IntCellValue(:final value) => value.toString(),
       DoubleCellValue(:final value) => value.toString(),
       BoolCellValue(:final value) => value ? 'true' : 'false',

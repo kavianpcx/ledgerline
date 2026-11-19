@@ -100,9 +100,9 @@ void main() {
     cell('G1', TextCellValue('Barcode'));
     cell('A2', TextCellValue('TEA-1'));
     cell('B2', TextCellValue('چای, سبز'));
-    cell('C2', DoubleCellValue(12.34));
-    cell('D2', DoubleCellValue(6.1));
-    cell('E2', IntCellValue(5));
+    cell('C2', const DoubleCellValue(12.34));
+    cell('D2', const DoubleCellValue(6.1));
+    cell('E2', const IntCellValue(5));
     cell('F2', TextCellValue('نوشیدنی'));
     cell('G2', TextCellValue('0012345678905'));
 
