@@ -263,7 +263,7 @@ void main() {
       lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
       paymentAmountCents: 4000,
       additionalPayments: [
-        InvoiceTenderDraft(
+        const InvoiceTenderDraft(
           amountCents: 6000,
           paymentMethod: 'bank_transfer',
         ),
@@ -300,7 +300,7 @@ void main() {
         lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
         paymentAmountCents: 4000,
         additionalPayments: [
-          InvoiceTenderDraft(
+          const InvoiceTenderDraft(
             amountCents: 7000,
             paymentMethod: 'bank_transfer',
           ),
@@ -376,7 +376,7 @@ void main() {
         lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
         paymentAmountCents: 4000,
         additionalPayments: [
-          InvoiceTenderDraft(
+          const InvoiceTenderDraft(
             amountCents: 6000,
             paymentMethod: 'bank_transfer',
           ),
