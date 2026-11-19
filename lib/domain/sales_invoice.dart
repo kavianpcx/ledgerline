@@ -10,6 +10,16 @@ class InvoiceLineDraft {
   final int? expectedUnitPriceCents;
 }
 
+class InvoiceTenderDraft {
+  const InvoiceTenderDraft({
+    required this.amountCents,
+    required this.paymentMethod,
+  });
+
+  final int amountCents;
+  final String paymentMethod;
+}
+
 class InvoiceDraft {
   const InvoiceDraft({
     required this.customerName,
@@ -18,6 +28,7 @@ class InvoiceDraft {
     this.taxCents = 0,
     this.paymentAmountCents = 0,
     this.paymentMethod = 'cash',
+    this.additionalPayments = const [],
   });
 
   final String customerName;
@@ -26,6 +37,7 @@ class InvoiceDraft {
   final int taxCents;
   final int paymentAmountCents;
   final String paymentMethod;
+  final List<InvoiceTenderDraft> additionalPayments;
 }
 
 class InvoicePaymentDraft {

@@ -238,6 +238,167 @@ void main() {
     expect((await repository.loadSnapshot()).invoices, hasLength(1));
   });
 
+
+  test('posts split cash and bank tenders to their matching accounts', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await repository.createProduct(const ProductDraft(
+      sku: 'MUG-SPLIT',
+      name: 'Split tender mug',
+      unitPriceCents: 10000,
+      unitCostCents: 4000,
+      stockQuantity: 3,
+    ));
+    final product = (await repository.loadProducts()).single;
+
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Split payment customer',
+      date: DateTime(2026, 11, 19),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+      paymentAmountCents: 4000,
+      additionalPayments: [
+        InvoiceTenderDraft(
+          amountCents: 6000,
+          paymentMethod: 'bank_transfer',
+        ),
+      ],
+    ));
+
+    final snapshot = await repository.loadSnapshot();
+    final invoice = snapshot.invoices.single;
+    expect(invoice.status, 'paid');
+    expect(invoice.paidCents, 10000);
+    expect(snapshot.products.single.stockQuantity, 2);
+    expect(
+      snapshot.assetsCents,
+      snapshot.liabilitiesCents + snapshot.equityCents + snapshot.netIncomeCents,
+    );
+
+    final payments = await database.handle.query(
+      'invoice_payments',
+      where: 'invoice_id = ?',
+      whereArgs: [invoice.id],
+    );
+    expect(payments, hasLength(2));
+    final paidByMethod = <String, int>{
+      for (final payment in payments)
+        (payment['payment_method']! as String):
+            (payment['amount_cents']! as int),
+    };
+    expect(paidByMethod, {'cash': 4000, 'bank_transfer': 6000});
+
+    await expectLater(
+      repository.createInvoice(InvoiceDraft(
+        customerName: 'Overpaid split customer',
+        date: DateTime(2026, 11, 20),
+        lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+        paymentAmountCents: 4000,
+        additionalPayments: [
+          InvoiceTenderDraft(
+            amountCents: 7000,
+            paymentMethod: 'bank_transfer',
+          ),
+        ],
+      )),
+      throwsArgumentError,
+    );
+    expect((await repository.loadSnapshot()).invoices, hasLength(1));
+    expect((await repository.loadProducts()).single.stockQuantity, 2);
+
+    final paymentLines = await database.handle.query(
+      'journal_lines',
+      where: 'entry_id IN (?, ?)',
+      whereArgs: payments.map((payment) => payment['id']).toList(),
+    );
+    final cashLine = paymentLines.singleWhere(
+      (line) => line['account_id'] == 'cash',
+    );
+    final bankLine = paymentLines.singleWhere(
+      (line) => line['account_id'] == 'bank',
+    );
+    final receivablesLines = paymentLines
+        .where((line) => line['account_id'] == 'receivables')
+        .toList();
+    expect(cashLine['debit_cents'], 4000);
+    expect(cashLine['credit_cents'], 0);
+    expect(bankLine['debit_cents'], 6000);
+    expect(bankLine['credit_cents'], 0);
+    expect(
+      receivablesLines.fold<int>(
+        0,
+        (sum, line) => sum + (line['credit_cents']! as int),
+      ),
+      10000,
+    );
+  });
+
+  test('rolls back the invoice and first tender when a later tender fails',
+      () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await repository.createProduct(const ProductDraft(
+      sku: 'MUG-SPLIT-ROLLBACK',
+      name: 'Split rollback mug',
+      unitPriceCents: 10000,
+      unitCostCents: 4000,
+      stockQuantity: 3,
+    ));
+    final product = (await repository.loadProducts()).single;
+    final journalCountBefore =
+        (await database.handle.query('journal_entries')).length;
+    final movementCountBefore =
+        (await database.handle.query('stock_movements')).length;
+    await database.handle.execute('''
+      CREATE TRIGGER reject_split_bank_tender
+      BEFORE INSERT ON invoice_payments
+      WHEN NEW.payment_method = 'bank_transfer'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced later tender failure');
+      END;
+    ''');
+
+    await expectLater(
+      repository.createInvoice(InvoiceDraft(
+        customerName: 'Rollback customer',
+        date: DateTime(2026, 11, 19),
+        lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+        paymentAmountCents: 4000,
+        additionalPayments: [
+          InvoiceTenderDraft(
+            amountCents: 6000,
+            paymentMethod: 'bank_transfer',
+          ),
+        ],
+      )),
+      throwsA(isA<Object>()),
+    );
+
+    expect(await database.handle.query('sales_invoices'), isEmpty);
+    expect(await database.handle.query('invoice_lines'), isEmpty);
+    expect(await database.handle.query('invoice_payments'), isEmpty);
+    expect((await repository.loadProducts()).single.stockQuantity, 3);
+    expect(
+      (await database.handle.query('journal_entries')).length,
+      journalCountBefore,
+    );
+    expect(
+      (await database.handle.query('stock_movements')).length,
+      movementCountBefore,
+    );
+  });
+
   test('records partial and final invoice payments against receivables', () async {
     final database = await LedgerDatabase.openInMemory();
     addTearDown(database.close);

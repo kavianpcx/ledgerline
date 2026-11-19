@@ -622,6 +622,10 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
         ),
       );
       if (request == null || !mounted || _cart.isEmpty) return;
+      final paymentAmountCents = request.payments.fold<int>(
+        0,
+        (sum, payment) => sum + payment.amountCents,
+      );
       setState(() => _checkingOut = true);
 
       await widget.repository.createInvoice(
@@ -636,8 +640,11 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
                 expectedUnitPriceCents: line.product.unitPriceCents,
               ),
           ],
-          paymentAmountCents: request.paymentAmountCents,
-          paymentMethod: request.paymentMethod,
+          paymentAmountCents:
+              request.payments.isEmpty ? 0 : request.payments.first.amountCents,
+          paymentMethod:
+              request.payments.isEmpty ? 'cash' : request.payments.first.paymentMethod,
+          additionalPayments: request.payments.skip(1).toList(growable: false),
         ),
       );
       invoicePosted = true;
@@ -651,9 +658,9 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
         _notify(
           tr(
             context,
-            request.paymentAmountCents == total
+            paymentAmountCents == total
                 ? 'posSalePaid'
-                : request.paymentAmountCents > 0
+                : paymentAmountCents > 0
                     ? 'posSalePartiallyPaid'
                     : 'posSaleOnAccount',
           ),
@@ -689,6 +696,321 @@ class PosCartLine {
 }
 
 class _PosCheckoutRequest {
+  const _PosCheckoutRequest({
+    required this.customerName,
+    required this.payments,
+  });
+
+  final String customerName;
+  final List<InvoiceTenderDraft> payments;
+}
+
+class _AdditionalPosTender {
+  _AdditionalPosTender() : amountController = TextEditingController();
+
+  final TextEditingController amountController;
+  String paymentMethod = 'bank_transfer';
+
+  void dispose() => amountController.dispose();
+}
+
+class _PosCheckoutDialog extends StatefulWidget {
+  const _PosCheckoutDialog({
+    required this.currencyCode,
+    required this.totalCents,
+  });
+
+  final String currencyCode;
+  final int totalCents;
+
+  @override
+  State<_PosCheckoutDialog> createState() => _PosCheckoutDialogState();
+}
+
+class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final TextEditingController _customerName = TextEditingController(
+    text: 'Walk-in customer',
+  );
+  final TextEditingController _paymentAmount = TextEditingController();
+  final List<_AdditionalPosTender> _additionalTenders = [];
+  bool _collectPaymentNow = true;
+  String _paymentMethod = 'cash';
+
+  int? _parseAmount(String value) => CurrencyDefinition.parseMinorUnits(
+        value,
+        currencyCode: widget.currencyCode,
+      );
+
+  int get _displayedPaymentAmountCents {
+    if (!_collectPaymentNow) return 0;
+    final amounts = [
+      _parseAmount(_paymentAmount.text),
+      for (final tender in _additionalTenders)
+        _parseAmount(tender.amountController.text),
+    ];
+    var collected = 0;
+    for (final amount in amounts) {
+      if (amount == null || amount <= 0) continue;
+      if (amount > widget.totalCents - collected) return widget.totalCents;
+      collected += amount;
+    }
+    return collected;
+  }
+
+  int get _balanceDueCents =>
+      widget.totalCents - _displayedPaymentAmountCents;
+
+  TextEditingController _controllerForTender(int index) =>
+      index == 0 ? _paymentAmount : _additionalTenders[index - 1].amountController;
+
+  String _methodForTender(int index) =>
+      index == 0 ? _paymentMethod : _additionalTenders[index - 1].paymentMethod;
+
+  void _setMethodForTender(int index, String method) {
+    if (index == 0) {
+      _paymentMethod = method;
+    } else {
+      _additionalTenders[index - 1].paymentMethod = method;
+    }
+  }
+
+  String? _validateTenderAmount(int index, String? value) {
+    final amount = _parseAmount(value ?? '');
+    if (amount == null || amount <= 0) {
+      return tr(context, 'posPaymentAmountInvalid');
+    }
+
+    var otherTotal = 0;
+    final controllers = [
+      _paymentAmount,
+      for (final tender in _additionalTenders) tender.amountController,
+    ];
+    for (var otherIndex = 0; otherIndex < controllers.length; otherIndex++) {
+      if (otherIndex == index) continue;
+      final otherAmount = _parseAmount(controllers[otherIndex].text);
+      if (otherAmount == null || otherAmount <= 0) continue;
+      if (otherAmount > widget.totalCents - otherTotal) {
+        return tr(context, 'posPaymentAmountExceeds');
+      }
+      otherTotal += otherAmount;
+    }
+    if (amount > widget.totalCents - otherTotal) {
+      return tr(context, 'posPaymentAmountExceeds');
+    }
+    return null;
+  }
+
+  void _addTender() {
+    setState(() => _additionalTenders.add(_AdditionalPosTender()));
+  }
+
+  void _removeTender(int index) {
+    final tender = _additionalTenders.removeAt(index - 1);
+    tender.dispose();
+    setState(() {});
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _paymentAmount.text = CurrencyDefinition.of(widget.currencyCode)
+        .formatInput(widget.totalCents);
+  }
+
+  @override
+  void dispose() {
+    _customerName.dispose();
+    _paymentAmount.dispose();
+    for (final tender in _additionalTenders) {
+      tender.dispose();
+    }
+    super.dispose();
+  }
+
+  Widget _tenderEditor(int index) {
+    final controller = _controllerForTender(index);
+    final isAdditional = index > 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (isAdditional) ...[
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  tr(context, 'posPaymentPart') + ' ' + (index + 1).toString(),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              IconButton(
+                key: ValueKey('pos-remove-payment-$index'),
+                tooltip: tr(context, 'posRemovePaymentMethod'),
+                onPressed: () => _removeTender(index),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ],
+          ),
+        ],
+        TextFormField(
+          key: index == 0
+              ? const Key('pos-payment-amount')
+              : ValueKey('pos-payment-amount-$index'),
+          controller: controller,
+          keyboardType: TextInputType.numberWithOptions(
+            decimal: CurrencyDefinition.of(widget.currencyCode)
+                    .minorUnitExponent >
+                0,
+          ),
+          decoration: InputDecoration(
+            labelText: tr(context, 'posPaymentAmount'),
+          ),
+          onChanged: (_) => setState(() {}),
+          validator: (value) => _validateTenderAmount(index, value),
+        ),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          key: index == 0
+              ? const Key('pos-payment-method')
+              : ValueKey('pos-payment-method-$index'),
+          initialValue: _methodForTender(index),
+          decoration: InputDecoration(
+            labelText: tr(context, 'posPaymentMethod'),
+          ),
+          items: [
+            DropdownMenuItem(
+              value: 'cash',
+              child: Text(tr(context, 'posPaymentCash')),
+            ),
+            DropdownMenuItem(
+              value: 'bank_transfer',
+              child: Text(tr(context, 'posPaymentBankTransfer')),
+            ),
+          ],
+          onChanged: (value) {
+            if (value != null) {
+              setState(() => _setMethodForTender(index, value));
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text(tr(context, 'posCheckoutTitle')),
+        content: SizedBox(
+          width: 420,
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextFormField(
+                    key: const Key('pos-customer-name'),
+                    controller: _customerName,
+                    autofocus: true,
+                    decoration:
+                        InputDecoration(labelText: tr(context, 'customer')),
+                    validator: (value) => value == null || value.trim().isEmpty
+                        ? tr(context, 'posCustomerRequired')
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                  CheckboxListTile(
+                    key: const Key('pos-collect-payment-now'),
+                    value: _collectPaymentNow,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    onChanged: (value) =>
+                        setState(() => _collectPaymentNow = value ?? false),
+                    title: Text(tr(context, 'posCollectPaymentNow')),
+                    subtitle: Text(tr(context, 'posPaymentHint')),
+                  ),
+                  if (_collectPaymentNow) ...[
+                    const SizedBox(height: 8),
+                    for (var index = 0;
+                        index <= _additionalTenders.length;
+                        index++) ...[
+                      if (index > 0) const SizedBox(height: 12),
+                      _tenderEditor(index),
+                    ],
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      key: const Key('pos-add-payment-method'),
+                      onPressed: _addTender,
+                      icon: const Icon(Icons.add_rounded),
+                      label: Text(tr(context, 'posAddPaymentMethod')),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(child: Text(tr(context, 'total'))),
+                      Text(
+                        CurrencyDefinition.of(widget.currencyCode)
+                            .formatMinorUnits(widget.totalCents),
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(child: Text(tr(context, 'posBalanceDue'))),
+                      Text(
+                        CurrencyDefinition.of(widget.currencyCode)
+                            .formatMinorUnits(_balanceDueCents),
+                        key: const Key('pos-balance-due'),
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(tr(context, 'cancel')),
+          ),
+          FilledButton(
+            key: const Key('pos-submit-checkout'),
+            onPressed: _submit,
+            child: Text(tr(context, 'posCompleteSale')),
+          ),
+        ],
+      );
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    final payments = _collectPaymentNow
+        ? <InvoiceTenderDraft>[
+            InvoiceTenderDraft(
+              amountCents: _parseAmount(_paymentAmount.text)!,
+              paymentMethod: _paymentMethod,
+            ),
+            for (final tender in _additionalTenders)
+              InvoiceTenderDraft(
+                amountCents: _parseAmount(tender.amountController.text)!,
+                paymentMethod: tender.paymentMethod,
+              ),
+          ]
+        : <InvoiceTenderDraft>[];
+    Navigator.of(context).pop(
+      _PosCheckoutRequest(
+        customerName: _customerName.text.trim(),
+        payments: payments,
+      ),
+    );
+  }
+}
+
   const _PosCheckoutRequest({
     required this.customerName,
     required this.paymentAmountCents,

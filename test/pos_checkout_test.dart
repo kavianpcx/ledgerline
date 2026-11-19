@@ -303,6 +303,66 @@ void main() {
     expect(repository.invoiceDrafts.single.paymentMethod, 'bank_transfer');
   });
 
+
+  testWidgets('checkout supports cash and bank split tenders', (tester) async {
+    final repository = await _createWidgetRepository(tester);
+    addTearDown(() async {
+      await tester.runAsync(repository.close);
+    });
+
+    var refreshCount = 0;
+    await _mountPos(
+      tester,
+      repository,
+      const {},
+      onCompleted: () async {
+        refreshCount++;
+      },
+      onCartChanged: (_) {},
+    );
+
+    await tester.tap(find.byKey(const ValueKey('pos-product-COF-01')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('pos-checkout')));
+    await tester.tap(find.byKey(const Key('pos-checkout')));
+    await _pumpUntil(
+      tester,
+      () => find.byKey(const Key('pos-submit-checkout')).evaluate().isNotEmpty,
+    );
+
+    await tester.tap(find.byKey(const Key('pos-add-payment-method')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('pos-payment-amount')),
+      '4.00',
+    );
+    final secondAmount = find.byKey(const ValueKey('pos-payment-amount-1'));
+    await tester.ensureVisible(secondAmount);
+    await tester.enterText(secondAmount, '6.00');
+    await tester.pump();
+    expect(find.text('USD 0.00'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('pos-submit-checkout')));
+    await tester.pump();
+    expect(
+      find.text('Payment cannot exceed the invoice total.'),
+      findsAtLeastNWidgets(1),
+    );
+    await tester.enterText(secondAmount, '6.00');
+    await tester.pump();
+
+    await tester.ensureVisible(find.byKey(const Key('pos-submit-checkout')));
+    await tester.tap(find.byKey(const Key('pos-submit-checkout')));
+    await _pumpUntil(tester, () => refreshCount == 1);
+
+    expect(repository.invoiceDrafts, hasLength(1));
+    final draft = repository.invoiceDrafts.single;
+    expect(draft.paymentAmountCents, 400);
+    expect(draft.paymentMethod, 'cash');
+    expect(draft.additionalPayments, hasLength(1));
+    expect(draft.additionalPayments.single.amountCents, 600);
+    expect(draft.additionalPayments.single.paymentMethod, 'bank_transfer');
+  });
+
   testWidgets('unpaid checkout creates an on-account invoice draft',
       (tester) async {
     final repository = await _createWidgetRepository(tester);
