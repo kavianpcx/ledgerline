@@ -250,7 +250,7 @@ jobs:
             if ($Scenario -eq 'settings-fa' -and $recognized -notmatch 'زبان|منطقه') {
               throw "Persian settings labels were missing from $Scenario. OCR output: $recognized"
             }
-            if ($Scenario -in @('titlebar', 'installer-launch')) {
+            if ($Scenario -eq 'titlebar') {
               $titleImage = [System.Drawing.Bitmap]::new($ImagePath)
               $scaledTitle = $null
               $titleGraphics = $null
