@@ -22,6 +22,7 @@ import '../domain/money.dart';
 import '../domain/product.dart';
 import '../domain/stock_movement.dart';
 import '../domain/product_csv_import.dart';
+import '../domain/product_xlsx_import.dart';
 import '../domain/sales_invoice.dart';
 import '../services/offline_ocr_service.dart';
 import '../services/update_service.dart';
@@ -3221,6 +3222,7 @@ class _SmartImportPanelState extends State<_SmartImportPanel> {
   bool _busy = false;
   bool _ocrBusy = false;
   bool _mappingConfigured = false;
+  bool _xlsxBusy = false;
   _SmartImportMode _mode = _SmartImportMode.journal;
 
   @override
@@ -3335,6 +3337,13 @@ class _SmartImportPanelState extends State<_SmartImportPanel> {
                       : tr(context, 'productCsvColumns'),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
+                if (_mode == _SmartImportMode.products) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    tr(context, 'xlsxProductImportHint'),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
                 const SizedBox(height: 12),
                 TextField(
                   controller: _csv,
@@ -3355,24 +3364,34 @@ class _SmartImportPanelState extends State<_SmartImportPanel> {
                 const SizedBox(height: 10),
                 Wrap(spacing: 10, runSpacing: 8, children: [
                   OutlinedButton.icon(
-                    onPressed: _busy ? null : _pickCsv,
+                    onPressed: _busy || _xlsxBusy ? null : _pickCsv,
                     icon: const Icon(Icons.upload_file_rounded),
                     label: Text(tr(context, 'chooseCsvFile')),
                   ),
+                  if (_mode == _SmartImportMode.products)
+                    OutlinedButton.icon(
+                      onPressed: _busy || _xlsxBusy ? null : _pickXlsx,
+                      icon: _xlsxBusy
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.table_view_outlined),
+                      label: Text(
+                        _xlsxBusy ? tr(context, 'loadingXlsx') : tr(context, 'chooseXlsxFile'),
+                      ),
+                    ),
                   OutlinedButton.icon(
-                    onPressed: _busy ? null : _previewImport,
+                    onPressed: _busy || _xlsxBusy ? null : _previewImport,
                     icon: const Icon(Icons.manage_search),
                     label: Text(tr(context, 'previewImport')),
                   ),
                   if (_mode == _SmartImportMode.journal)
                     FilledButton.icon(
-                      onPressed: _busy || _preview.isEmpty ? null : _importJournal,
+                      onPressed: _busy || _xlsxBusy || _preview.isEmpty ? null : _importJournal,
                       icon: const Icon(Icons.file_download_done),
                       label: Text(tr(context, 'importRows')),
                     )
                   else
                     FilledButton.icon(
-                      onPressed: _busy || !_canImportProducts ? null : _importProducts,
+                      onPressed: _busy || _xlsxBusy || !_canImportProducts ? null : _importProducts,
                       icon: _busy
                           ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                           : const Icon(Icons.inventory_2_outlined),
@@ -3630,6 +3649,48 @@ class _SmartImportPanelState extends State<_SmartImportPanel> {
       });
     } on Object catch (error) {
       if (mounted) setState(() => _error = tr(context, 'fileCouldNotBeRead') + ': ' + error.toString());
+    }
+  }
+
+  Future<void> _pickXlsx() async {
+    try {
+      final selected = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['xlsx'],
+        withData: true,
+      );
+      if (selected == null || selected.files.isEmpty || !mounted) return;
+      final file = selected.files.single;
+      if (file.size > ProductXlsxImport.maxFileBytes) {
+        setState(() => _error = tr(context, 'xlsxFileTooLarge'));
+        return;
+      }
+      final bytes = file.bytes;
+      if (bytes == null) {
+        setState(() => _error = tr(context, 'fileCouldNotBeRead'));
+        return;
+      }
+      setState(() {
+        _xlsxBusy = true;
+        _error = null;
+        _clearPreviews();
+      });
+      final converted = await compute(ProductXlsxImport.toCsv, bytes);
+      if (!mounted) return;
+      setState(() {
+        _csv.text = converted;
+        _mode = _SmartImportMode.products;
+      });
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = error is FormatException
+              ? error.message.toString()
+              : tr(context, 'fileCouldNotBeRead') + ': ' + error.toString();
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _xlsxBusy = false);
     }
   }
 
