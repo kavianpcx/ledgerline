@@ -415,6 +415,14 @@ jobs:
             }
             if ($scenario -eq 'titlebar') {
               try {
+                if ([LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) {
+                  [LedgerlineWindowTest]::ShowWindow($process.MainWindowHandle, 9) | Out-Null
+                  for ($attempt = 0; $attempt -lt 20; $attempt++) {
+                    if (-not [LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { break }
+                    Start-Sleep -Milliseconds 100
+                  }
+                }
+                if ([LedgerlineWindowTest]::IsZoomed($process.MainWindowHandle)) { throw 'Could not restore the titlebar window before testing Ctrl+Shift+F.' }
                 [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
                 Start-Sleep -Milliseconds 500
                 if ([LedgerlineWindowTest]::GetForegroundWindow() -ne $process.MainWindowHandle) { throw 'Could not activate Ledgerline for keyboard shortcut verification.' }
