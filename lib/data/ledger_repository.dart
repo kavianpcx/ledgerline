@@ -1264,6 +1264,28 @@ class LedgerRepository {
     });
   }
 
+
+  /// Returns distinct customer names from recent invoices for POS quick selection.
+  Future<List<String>> loadRecentInvoiceCustomers({int limit = 50}) async {
+    if (limit < 1 || limit > 100) {
+      throw ArgumentError.value(limit, 'limit', 'Use a limit from 1 to 100.');
+    }
+    final rows = await _database.handle.rawQuery('''
+      SELECT TRIM(customer_name) AS customer_name,
+             MAX(issue_date) AS latest_issue_date,
+             MAX(created_at) AS latest_created_at
+      FROM sales_invoices
+      WHERE TRIM(customer_name) != ''
+      GROUP BY TRIM(customer_name)
+      ORDER BY latest_issue_date DESC, latest_created_at DESC,
+               customer_name COLLATE NOCASE ASC
+      LIMIT ?
+    ''', [limit]);
+    return rows
+        .map((row) => (row['customer_name'] as String).trim())
+        .toList(growable: false);
+  }
+
   Future<InvoicePaymentHistory?> loadInvoicePaymentHistory(
     String invoiceId,
   ) async {

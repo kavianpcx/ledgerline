@@ -59,9 +59,14 @@ Future<void> _addTestProduct(LedgerRepository repository) =>
 Future<_FakePosRepository> _createWidgetRepository(
   WidgetTester tester, {
   List<Product>? products,
+  List<String> customerNames = const [],
 }) async {
   final database = (await tester.runAsync(LedgerDatabase.openInMemory))!;
-  return _FakePosRepository(database, products: products);
+  return _FakePosRepository(
+    database,
+    products: products,
+    customerNames: customerNames,
+  );
 }
 
 Future<void> _mountPos(
@@ -236,6 +241,49 @@ void main() {
     await tester.tap(increase);
     await tester.pump();
     expect(tester.widget<Text>(quantity).data, '5');
+  });
+
+  testWidgets('checkout can select a recent invoice customer', (tester) async {
+    final repository = await _createWidgetRepository(
+      tester,
+      products: const [_coffee],
+      customerNames: const ['Mira Azadi', 'Nima Karimi'],
+    );
+    addTearDown(() async {
+      await tester.runAsync(repository.close);
+    });
+
+    await _mountPos(
+      tester,
+      repository,
+      const {
+        'product_coffee': PosCartLine(product: _coffee, quantity: 1),
+      },
+      onCompleted: () async {},
+      onCartChanged: (_) {},
+    );
+
+    await tester.tap(find.byKey(const Key('pos-checkout')));
+    await _pumpUntil(
+      tester,
+      () => find.byKey(const Key('pos-submit-checkout')).evaluate().isNotEmpty,
+    );
+
+    final customerField = find.byKey(const Key('pos-customer-name'));
+    await tester.tap(customerField);
+    await tester.enterText(customerField, 'Mira');
+    await _pumpUntil(
+      tester,
+      () => find.text('Mira Azadi').evaluate().isNotEmpty,
+    );
+    await tester.tap(find.text('Mira Azadi'));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<TextFormField>(customerField).controller?.text,
+      'Mira Azadi',
+    );
+    expect(repository.invoiceDrafts, isEmpty);
   });
 
   testWidgets('cash checkout submits the selected cart and full payment',
@@ -1024,11 +1072,20 @@ void main() {
 }
 
 class _FakePosRepository extends LedgerRepository {
-  _FakePosRepository(super.database, {List<Product>? products})
-      : _products = products ?? [_coffee];
+  _FakePosRepository(
+    super.database, {
+    List<Product>? products,
+    List<String> customerNames = const [],
+  })  : _products = products ?? [_coffee],
+        _customerNames = customerNames;
 
   final List<Product> _products;
+  final List<String> _customerNames;
   final List<InvoiceDraft> invoiceDrafts = [];
+
+  @override
+  Future<List<String>> loadRecentInvoiceCustomers({int limit = 50}) async =>
+      _customerNames.take(limit).toList(growable: false);
 
   @override
   Future<Product?> loadProductByBarcode(String barcode) async {
