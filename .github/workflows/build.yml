@@ -297,24 +297,33 @@ jobs:
             $width = $right - $left
             $height = $bottom - $top
             if ($width -lt 480 -or $height -lt 300) { throw "The visible $Scenario window area is too small to verify." }
-            $bitmap = [System.Drawing.Bitmap]::new($width, $height)
-            $graphics = $null
-            try {
-              $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-              $graphics.CopyFromScreen([System.Drawing.Point]::new($left, $top), [System.Drawing.Point]::Empty, [System.Drawing.Size]::new($width, $height))
-              $bitmap.Save($ImagePath, [System.Drawing.Imaging.ImageFormat]::Png)
-            } finally {
-              if ($null -ne $graphics) { $graphics.Dispose() }
-              $bitmap.Dispose()
+            $attemptPath = Join-Path $env:RUNNER_TEMP ('ledgerline-' + $Scenario + '-screen.png')
+            $lastVerificationError = $null
+            for ($attempt = 1; $attempt -le 15; $attempt++) {
+              $bitmap = [System.Drawing.Bitmap]::new($width, $height)
+              $graphics = $null
+              try {
+                $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+                $graphics.CopyFromScreen([System.Drawing.Point]::new($left, $top), [System.Drawing.Point]::Empty, [System.Drawing.Size]::new($width, $height))
+                $bitmap.Save($attemptPath, [System.Drawing.Imaging.ImageFormat]::Png)
+              } finally {
+                if ($null -ne $graphics) { $graphics.Dispose() }
+                $bitmap.Dispose()
+              }
+              try {
+                Assert-VisibleUiText -ImagePath $attemptPath -Scenario $Scenario
+                Move-Item -LiteralPath $attemptPath -Destination $ImagePath -Force | Out-Null
+                return
+              } catch {
+                $lastVerificationError = $_.Exception
+                if ($attempt -lt 15) {
+                  Write-Host ("Waiting for rendered UI in " + $Scenario + " (attempt " + $attempt + " of 15).")
+                  Start-Sleep -Seconds 1
+                }
+              }
             }
-            try {
-              Assert-VisibleUiText -ImagePath $ImagePath -Scenario $Scenario
-            } catch {
-              $verificationError = $Scenario + ': ' + $_.Exception.Message
-              $script:uiVerificationFailures.Add($verificationError)
-              Add-Content -Path $evidenceReport -Value ('verification_error=' + $verificationError) -Encoding utf8
-              Write-Host ('UI_TEXT_ASSERTION_FAILED ' + $verificationError)
-            }
+            Move-Item -LiteralPath $attemptPath -Destination $ImagePath -Force | Out-Null
+            throw $lastVerificationError.Message
           }
 
           $smokeInstallDirectory = Join-Path $env:RUNNER_TEMP 'LedgerlineInstallerSmoke'
