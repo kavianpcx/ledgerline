@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -61,7 +59,7 @@ class InvoicePrintService {
           _invoiceDetails(invoice, isPersian, isThermal),
           pw.SizedBox(height: isThermal ? 8 : 18),
           if (isThermal)
-            _receiptLines(invoice, currencyCode, isPersian)
+            _receiptLines(invoice, currencyCode)
           else
             _invoiceLines(invoice, currencyCode, isPersian),
           pw.SizedBox(height: 8),
@@ -166,6 +164,14 @@ class InvoicePrintService {
             invoice.customerName,
             isThermal,
           ),
+          _detailRow(
+            _text(isPersian, 'status'),
+            _text(
+              isPersian,
+              invoice.isReturned ? 'returned' : invoice.status,
+            ),
+            isThermal,
+          ),
         ],
       );
 
@@ -265,8 +271,6 @@ class InvoicePrintService {
   pw.Widget _receiptLines(
     InvoicePrintData invoice,
     String currencyCode,
-
-    bool isPersian,
   ) =>
       pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
@@ -410,6 +414,10 @@ class InvoicePrintService {
     const english = <String, String>{
       'invoice': 'Sales invoice',
       'number': 'Invoice number',
+      'status': 'Status',
+      'issued': 'Issued',
+      'paid': 'Paid',
+      'void': 'Voided',
       'date': 'Date',
       'customer': 'Customer',
       'item': 'Item',
@@ -428,6 +436,10 @@ class InvoicePrintService {
     const persian = <String, String>{
       'invoice': 'فاکتور فروش',
       'number': 'شماره فاکتور',
+      'status': 'وضعیت',
+      'issued': 'صادرشده',
+      'paid': 'پرداخت‌شده',
+      'void': 'باطل‌شده',
       'date': 'تاریخ',
       'customer': 'مشتری',
       'item': 'کالا',
