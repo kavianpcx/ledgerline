@@ -841,6 +841,19 @@ void main() {
     expect(firstHistory.recordedCents, 0);
     expect(firstHistory.balanceDueCents, 1948);
     expect(firstHistory.isReconciled, isTrue);
+    final firstPrintData = await repository.loadInvoicePrintData(invoice.id);
+    expect(firstPrintData?.returnedCents, 974);
+    expect(firstPrintData?.paidCents, 0);
+    expect(firstPrintData?.balanceDueCents, 1948);
+    await expectLater(
+      repository.returnInvoice(InvoiceReturnDraft(
+        invoiceId: invoice.id,
+        date: DateTime(2026, 11, 19),
+        reason: 'Prevent mixing a full return with partial returns',
+        refundMethod: 'cash',
+      )),
+      throwsStateError,
+    );
     expect(
       (await repository.loadInvoiceReturnableLines(invoice.id))
           .single
@@ -890,6 +903,10 @@ void main() {
     expect(history.partialReturnedCents, 2922);
     expect(history.totalRefundCents, 600);
     expect(history.isReconciled, isTrue);
+    final completedPrintData = await repository.loadInvoicePrintData(invoice.id);
+    expect(completedPrintData?.returnedCents, 2922);
+    expect(completedPrintData?.paidCents, 0);
+    expect(completedPrintData?.balanceDueCents, 0);
     final returnLines = await database.handle.query('journal_lines');
     expect(
       returnLines.any((line) =>
