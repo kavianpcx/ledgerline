@@ -2810,41 +2810,65 @@ class _InvoiceReturnDialogState extends State<_InvoiceReturnDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-        title: Text(tr(context, 'returnInvoiceTitle')),
-        content: SizedBox(
-          width: 520,
-          height: 540,
-          child: FutureBuilder<List<InvoiceReturnableLine>>(
-            future: _returnableLines,
-            builder: (context, result) {
-              if (result.connectionState != ConnectionState.done) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (result.hasError || result.data == null) {
-                return Center(child: Text(tr(context, 'paymentHistoryLoadFailed')));
-              }
-              final lines = result.data!;
-              if (!_selectionInitialized) {
-                for (final line in lines) {
-                  _selectedQuantities[line.invoiceLineId] =
-                      line.productAvailable ? line.availableQuantity : 0;
-                }
-                _selectionInitialized = true;
-              }
-              final selectedCount = _selectedQuantities.values.fold<int>(
-                0,
-                (sum, quantity) => sum + quantity,
-              );
-              var estimatedReturnValue = 0;
-              for (final line in lines) {
-                estimatedReturnValue += _estimatedValue(
-                  line,
-                  _selectedQuantities[line.invoiceLineId] ?? 0,
-                );
-              }
-              final currency = CurrencyDefinition.of(widget.currencyCode);
-              return Form(
+  Widget build(BuildContext context) => FutureBuilder<List<InvoiceReturnableLine>>(
+        future: _returnableLines,
+        builder: (context, result) {
+          if (result.connectionState != ConnectionState.done) {
+            return AlertDialog(
+              title: Text(tr(context, 'returnInvoiceTitle')),
+              content: const SizedBox(
+                width: 520,
+                height: 300,
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            );
+          }
+          if (result.hasError || result.data == null) {
+            return AlertDialog(
+              title: Text(tr(context, 'returnInvoiceTitle')),
+              content: SizedBox(
+                width: 520,
+                height: 180,
+                child: Center(
+                  child: Text(tr(context, 'paymentHistoryLoadFailed')),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(tr(context, 'cancel')),
+                ),
+              ],
+            );
+          }
+
+          final lines = result.data!;
+          if (!_selectionInitialized) {
+            for (final line in lines) {
+              _selectedQuantities[line.invoiceLineId] =
+                  line.productAvailable ? line.availableQuantity : 0;
+            }
+            _selectionInitialized = true;
+          }
+          final selectedCount = _selectedQuantities.values.fold<int>(
+            0,
+            (sum, quantity) => sum + quantity,
+          );
+          var estimatedReturnValue = 0;
+          for (final line in lines) {
+            estimatedReturnValue += _estimatedValue(
+              line,
+              _selectedQuantities[line.invoiceLineId] ?? 0,
+            );
+          }
+          final currency = CurrencyDefinition.of(widget.currencyCode);
+
+          return AlertDialog(
+            title: Text(tr(context, 'returnInvoiceTitle')),
+            content: SizedBox(
+              width: 520,
+              height: 540,
+              child: Form(
                 key: _formKey,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2996,29 +3020,16 @@ class _InvoiceReturnDialogState extends State<_InvoiceReturnDialog> {
                     ),
                   ],
                 ),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(tr(context, 'cancel')),
-          ),
-          FutureBuilder<List<InvoiceReturnableLine>>(
-            future: _returnableLines,
-            builder: (context, result) {
-              final lines = result.data ?? const <InvoiceReturnableLine>[];
-              final selectedCount = _selectedQuantities.values.fold<int>(
-                0,
-                (sum, quantity) => sum + quantity,
-              );
-              return FilledButton(
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(tr(context, 'cancel')),
+              ),
+              FilledButton(
                 key: ValueKey('invoice-return-confirm-' + widget.invoice.number),
-                onPressed: result.connectionState != ConnectionState.done ||
-                        result.hasError ||
-                        lines.isEmpty ||
-                        selectedCount <= 0
+                onPressed: lines.isEmpty || selectedCount <= 0
                     ? null
                     : () {
                         if (!_formKey.currentState!.validate()) return;
@@ -3043,10 +3054,10 @@ class _InvoiceReturnDialogState extends State<_InvoiceReturnDialog> {
                         );
                       },
                 child: Text(tr(context, 'returnInvoice')),
-              );
-            },
-          ),
-        ],
+              ),
+            ],
+          );
+        },
       );
 }
 
