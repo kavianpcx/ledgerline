@@ -1286,6 +1286,72 @@ class LedgerRepository {
         .toList(growable: false);
   }
 
+  /// Loads the immutable invoice snapshot used to render a customer document.
+  Future<InvoicePrintData?> loadInvoicePrintData(String invoiceId) async {
+    final normalizedId = invoiceId.trim();
+    if (normalizedId.isEmpty) {
+      throw ArgumentError.value(invoiceId, 'invoiceId');
+    }
+    return _database.handle.transaction((txn) async {
+      final invoiceRows = await txn.query(
+        'sales_invoices',
+        columns: [
+          'invoice_number',
+          'customer_name',
+          'issue_date',
+          'status',
+          'subtotal_cents',
+          'discount_cents',
+          'tax_cents',
+          'total_cents',
+          'returned_at',
+        ],
+        where: 'id = ?',
+        whereArgs: [normalizedId],
+        limit: 1,
+      );
+      if (invoiceRows.isEmpty) return null;
+      final invoice = invoiceRows.single;
+      final lineRows = await txn.query(
+        'invoice_lines',
+        columns: [
+          'description',
+          'quantity',
+          'unit_price_cents',
+          'line_total_cents',
+        ],
+        where: 'invoice_id = ?',
+        whereArgs: [normalizedId],
+        orderBy: 'id ASC',
+      );
+      final paymentRows = await txn.rawQuery(
+        'SELECT COALESCE(SUM(amount_cents), 0) AS paid_cents '
+        'FROM invoice_payments WHERE invoice_id = ?',
+        [normalizedId],
+      );
+      return InvoicePrintData(
+        invoiceNumber: invoice['invoice_number']! as String,
+        customerName: invoice['customer_name']! as String,
+        issueDate: DateTime.parse(invoice['issue_date']! as String),
+        status: invoice['status']! as String,
+        subtotalCents: invoice['subtotal_cents']! as int,
+        discountCents: invoice['discount_cents'] as int? ?? 0,
+        taxCents: invoice['tax_cents']! as int,
+        totalCents: invoice['total_cents']! as int,
+        paidCents: paymentRows.single['paid_cents']! as int,
+        isReturned: invoice['returned_at'] != null,
+        lines: lineRows
+            .map((row) => InvoicePrintLine(
+                  description: row['description']! as String,
+                  quantity: row['quantity']! as int,
+                  unitPriceCents: row['unit_price_cents']! as int,
+                  lineTotalCents: row['line_total_cents']! as int,
+                ))
+            .toList(growable: false),
+      );
+    });
+  }
+
   Future<InvoicePaymentHistory?> loadInvoicePaymentHistory(
     String invoiceId,
   ) async {

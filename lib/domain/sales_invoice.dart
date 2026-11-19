@@ -70,6 +70,52 @@ class InvoicePaymentDraft {
   final String paymentMethod;
 }
 
+
+class InvoicePrintLine {
+  const InvoicePrintLine({
+    required this.description,
+    required this.quantity,
+    required this.unitPriceCents,
+    required this.lineTotalCents,
+  });
+
+  final String description;
+  final int quantity;
+  final int unitPriceCents;
+  final int lineTotalCents;
+}
+
+class InvoicePrintData {
+  const InvoicePrintData({
+    required this.invoiceNumber,
+    required this.customerName,
+    required this.issueDate,
+    required this.status,
+    required this.subtotalCents,
+    required this.discountCents,
+    required this.taxCents,
+    required this.totalCents,
+    required this.paidCents,
+    required this.isReturned,
+    required this.lines,
+  });
+
+  final String invoiceNumber;
+  final String customerName;
+  final DateTime issueDate;
+  final String status;
+  final int subtotalCents;
+  final int discountCents;
+  final int taxCents;
+  final int totalCents;
+  final int paidCents;
+  final bool isReturned;
+  final List<InvoicePrintLine> lines;
+
+  int get balanceDueCents =>
+      totalCents <= paidCents ? 0 : totalCents - paidCents;
+}
+
 class InvoicePaymentRecord {
   const InvoicePaymentRecord({
     required this.id,

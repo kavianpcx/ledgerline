@@ -25,6 +25,7 @@ import '../domain/product_csv_import.dart';
 import '../domain/product_xlsx_import.dart';
 import '../domain/sales_invoice.dart';
 import '../services/offline_ocr_service.dart';
+import '../services/invoice_print_service.dart';
 import '../services/update_service.dart';
 import 'app_strings.dart';
 import 'widgets/searchable_select.dart';
@@ -79,6 +80,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   late final UpdateService _updateService;
   bool _checkingUpdates = false;
   bool _downloadingUpdate = false;
+  String? _printingInvoiceId;
   bool _restoringBackup = false;
   bool _updateChecked = false;
   bool _updateCheckFailed = false;
@@ -396,6 +398,32 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
           product: product,
         ),
       );
+
+  Future<void> _printInvoice(
+    SalesInvoice invoice,
+    InvoicePrintFormat format,
+  ) async {
+    if (_printingInvoiceId != null) return;
+    setState(() => _printingInvoiceId = invoice.id);
+    try {
+      final printData =
+          await widget.repository.loadInvoicePrintData(invoice.id);
+      if (printData == null) {
+        throw StateError('The invoice no longer exists.');
+      }
+      await InvoicePrintService().printInvoice(
+        invoice: printData,
+        businessName: widget.settings.businessName,
+        currencyCode: widget.settings.currencyCode,
+        format: format,
+        isPersian: Localizations.localeOf(context).languageCode == 'fa',
+      );
+    } on Object {
+      if (mounted) _notify(tr(context, 'invoicePrintFailed'));
+    } finally {
+      if (mounted) setState(() => _printingInvoiceId = null);
+    }
+  }
 
   Future<void> _showInvoicePaymentHistory(SalesInvoice invoice) =>
       showDialog<void>(
@@ -1252,6 +1280,34 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
               spacing: 8,
               runSpacing: 4,
               children: [
+                IconButton(
+                  key: ValueKey('invoice-print-a4-' + invoice.number),
+                  tooltip: tr(context, 'printInvoiceA4'),
+                  onPressed: _printingInvoiceId == null
+                      ? () => _printInvoice(invoice, InvoicePrintFormat.a4)
+                      : null,
+                  icon: _printingInvoiceId == invoice.id
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.print_outlined),
+                ),
+                IconButton(
+                  key: ValueKey('invoice-print-thermal-' + invoice.number),
+                  tooltip: tr(context, 'printThermalReceipt'),
+                  onPressed: _printingInvoiceId == null
+                      ? () => _printInvoice(invoice, InvoicePrintFormat.thermal80)
+                      : null,
+                  icon: _printingInvoiceId == invoice.id
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.receipt_long_outlined),
+                ),
                 TextButton.icon(
                   key: ValueKey('invoice-payment-history-' + invoice.number),
                   onPressed: () => _showInvoicePaymentHistory(invoice),
