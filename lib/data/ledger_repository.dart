@@ -129,10 +129,28 @@ class LedgerRepository {
     );
     final products = productRows.map(Product.fromRow).toList(growable: false);
     final invoiceRows = await db.rawQuery('''
-      SELECT i.*, COALESCE(SUM(p.amount_cents), 0) AS paid_cents
-      FROM sales_invoices i
-      LEFT JOIN invoice_payments p ON p.invoice_id = i.id
-      GROUP BY i.id
+      SELECT i.*,
+        COALESCE((
+          SELECT SUM(p.amount_cents)
+          FROM invoice_payments AS p
+          WHERE p.invoice_id = i.id
+        ), 0)
+        - COALESCE((
+          SELECT SUM(r.refund_amount_cents)
+          FROM invoice_partial_returns AS r
+          WHERE r.invoice_id = i.id
+        ), 0)
+        - COALESCE((
+          SELECT SUM(r.refund_amount_cents)
+          FROM invoice_returns AS r
+          WHERE r.invoice_id = i.id
+        ), 0) AS paid_cents,
+        COALESCE((
+          SELECT SUM(r.return_value_cents)
+          FROM invoice_partial_returns AS r
+          WHERE r.invoice_id = i.id
+        ), 0) AS returned_cents
+      FROM sales_invoices AS i
       ORDER BY i.issue_date DESC, i.created_at DESC
       LIMIT 200
     ''');
