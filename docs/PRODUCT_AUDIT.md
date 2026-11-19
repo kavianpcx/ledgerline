@@ -4,26 +4,26 @@
 
 This audit compares the current GitHub source with docs/PRODUCT_SPECIFICATION.md and distinguishes merged code from remaining work.
 
-PR #16 was merged as `c55e1752ba068e9ae89ad8fd08f02b88952851e1`. [PR workflow run 44475420853](https://github.com/kavianpcx/ledgerline/actions/runs/44475420853) passed analysis, all ten test suites, Windows release packaging, installer packaging, and UI evidence capture. Post-merge [run 44476927408](https://github.com/kavianpcx/ledgerline/actions/runs/44476927408) passed all checks. The screenshots were captured but not manually reviewed.
+PR #18 is merged as `f191f1ba2ea92be24c2cead6040d204ef9843cb2`. [PR workflow run 44492408849](https://github.com/kavianpcx/ledgerline/actions/runs/44492408849) passed analysis, all ten test suites, Windows packaging, and the installer launch smoke check. The UI capture step passed, but it only checked for a visible window and did not assert visible controls or text. The post-merge run is being verified. [Run 44487141126](https://github.com/kavianpcx/ledgerline/actions/runs/44487141126) on the previous main commit passed analysis, Windows packaging, and all ten tests; its public release job was skipped because the commit message lacked `[release]`. That gate only publishes for a marked push to `main`. The published prerelease remains v0.5.1-beta.1 (November 18, 2026).
 
-PR #2 through #16 provide Windows sidebar repair, currency safeguards, editable and paginated catalog, reviewed CSV/XLSX import, transactional POS, barcode lookup, partial and split receipts, invoice payment history and reconciliation, configurable default sales tax, invoice discounts, full-invoice returns, product images/icons, F2/F4 POS shortcuts, and recent-invoice customer selection. The v7 migration links existing manual payments only when date, amount, method, and invoice description match; unmatched receipts remain flagged for review. Schema v8 stores discounts on new invoices and migrates older invoices with a zero discount. Schema v9 records full-invoice returns and customer-return stock movements. Schema v10 adds built-in product icons and optional product-image BLOBs.
+PR #2 through #18 provide Windows sidebar repair, currency safeguards, editable and paginated catalog, reviewed CSV/XLSX import, transactional POS, barcode lookup, partial and split receipts, invoice payment history and reconciliation, configurable default sales tax, invoice discounts, full and partial-line returns, invoice and thermal receipt PDFs, product images/icons, F2/F4 POS shortcuts, and recent-invoice customer selection. The v7 migration links existing manual payments only when date, amount, method, and invoice description match; unmatched receipts remain flagged for review. Schema v8 stores discounts on new invoices and migrates older invoices with a zero discount. Schema v9 records full-invoice returns and customer-return stock movements. Schema v10 adds built-in product icons and optional product-image BLOBs. Schema v11 adds per-return headers and line snapshots for partial-line invoice returns without rewriting existing invoices or payment rows.
 
 ## What works on main
 
 - Flutter Windows desktop application with integrated title bar, window controls, keyboard shortcuts, and permanent left sidebar.
-- SQLite schema v10 with accounts, journal entries and lines, products, invoices, invoice lines, invoice discounts, invoice payment and return history, stock movement history, application settings, product icon keys, and bounded image BLOBs.
+- SQLite schema v11 with accounts, journal entries and lines, products, invoices and lines, discounts, invoice payment and full/partial return history, stock movement history, application settings, product icon keys, and bounded image BLOBs.
 - Integer minor-unit accounting, confirmed/locked base currency, balanced journals, invoice sales/payments, and opening-inventory posting. Accounting remains limited to one base currency.
 - Editable product records with indexed database search, sorting, and pagination at 10/25/50/100 rows per page.
 - Reviewed CSV and XLSX product import with mapping, validation, duplicate checks, and atomic catalog/opening-inventory posting. Product images and built-in icons are also supported on main.
-- Basic retail POS with persisted cart, price/stock revalidation, exact barcode lookup from keyboard input and Enter, F2/F4 keyboard shortcuts, searchable suggestions from prior invoice customer names, cash or bank-transfer payments including partial receipts and split tenders, on-account invoices, and atomic sale/inventory/journal/payment postings. Full-invoice returns refund collected payments, cancel remaining receivables, restore stock, and reverse journal postings transactionally. A4 invoice and 80 mm receipt PDFs render saved invoice snapshots in English and Persian and open the system print dialog; physical printer output is not verified.
-- Append-only stock history for opening balances, CSV imports, adjustments, sales, and full-invoice customer returns. Existing quantities migrate as labeled balance-forward records; earlier events are not reconstructed.
+- Basic retail POS with persisted cart, price/stock revalidation, exact barcode lookup from keyboard input and Enter, F2/F4 keyboard shortcuts, searchable suggestions from prior invoice customer names, cash or bank-transfer payments including partial receipts and split tenders, on-account invoices, and atomic sale/inventory/journal/payment postings. Full and partial-line returns refund collected amounts, credit remaining receivables, restore returned stock, and reverse revenue, tax, and cost postings transactionally. Partial-line returns prorate invoice discounts and tax over returned quantities and preserve return/payment history. A4 invoice and 80 mm receipt PDFs render saved invoice snapshots in English and Persian, show returned value, and open the system print dialog; physical printer output is not verified.
+- Append-only stock history for opening balances, CSV imports, adjustments, sales, and full/partial customer returns. Existing quantities migrate as labeled balance-forward records; earlier events are not reconstructed.
 - English and Persian UI, light/dark themes, SQLite backup/restore with integrity checks, offline Tesseract OCR text extraction, and partial GitHub release discovery.
 
 The tagged v0.5.1-beta.1 release predates the current currency, catalog, import, and POS changes. The verified distribution remains Windows-only.
 
 ## POS gaps remaining
 
-Full-invoice refunds/returns, F2/F4 POS shortcuts, and searchable suggestions from prior invoice customer names are implemented on main. Partial-line returns, invoice and thermal receipts, persistent customer records, terminals, and restaurant workflows remain incomplete. Tax and invoice discounts are also merged into main.
+Full and partial-line returns, A4 invoice and thermal receipt PDFs, F2/F4 POS shortcuts, and searchable suggestions from prior invoice customer names are implemented on main. Persistent customer records, authorized terminals, and restaurant workflows remain incomplete. Tax and invoice discounts are also merged into main.
 
 ## Incomplete product functionality
 
@@ -37,12 +37,12 @@ Full-invoice refunds/returns, F2/F4 POS shortcuts, and searchable suggestions fr
 
 ## Risks and verification limits
 
-CI proves only the checks included in a workflow. Manual review of the PR #6 and PR #7 Windows UI artifacts found blank application windows; later screenshot artifacts, including PR #10 and PR #13, have not been manually reviewed. Capture success alone is not visual acceptance. The snapshot query loads the full product catalog while recent entries and invoices are capped at 200; large-data dashboard/report pagination and aggregation still need work. High-DPI, resize-edge, drag, Snap, Android hardware, and physical-device camera behavior remain unverified. The application is not ready for sensitive multi-user or multi-device production use.
+CI proves only the checks included in a workflow. The latest PR #17 evidence from run 44487141126 contains nearly blank currency-popup, Persian settings, and titlebar screenshots; its narrow-sidebar capture shows a blank app with a console behind it. The prior capture workflow checked window visibility but did not confirm foreground state, crop to the app window, or require screen content. Release visual acceptance remains open until app-window screenshots are recaptured, expected text is verified, and the resulting images are inspected. The snapshot query loads the full product catalog while recent entries and invoices are capped at 200; large-data dashboard/report pagination and aggregation still need work. High-DPI, resize-edge, drag, Snap, Android hardware, and physical-device camera behavior remain unverified. The application is not ready for sensitive multi-user or multi-device production use.
 
 ## Next implementation order
 
-1. Add partial-line returns and persistent customer records; validate A4 and thermal output with supported printer hardware.
-2. Add document table parsing and structured OCR with review and confidence signals.
-3. Add purchasing, suppliers, stock reconciliation, and multiple warehouses.
-4. Implement service-layer permissions, protected management, shifts, and idempotent close.
-5. Extend Android workflows, reports, currency support, secure synchronization, update/backup security, and verified releases.
+1. Complete Windows release readiness with visible-content assertions, recaptured screenshots, and installer launch evidence; prepare a review-only candidate without publishing.
+2. Add persistent customer records and validate A4/thermal output with supported printer hardware.
+3. Add document table parsing and structured OCR with review and confidence signals.
+4. Add purchasing, suppliers, stock reconciliation, and multiple warehouses.
+5. Implement service-layer permissions, protected management, shifts, idempotent close, and continue Android and secure synchronization work.
