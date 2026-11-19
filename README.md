@@ -20,13 +20,13 @@ PR [#2](https://github.com/kavianpcx/ledgerline/pull/2) restored permanent left-
 
 ## Current source and development work
 
-PRs #3 through #11 are merged into `main`. PR #11's merge commit is `ab6b9188844cb65872850fa27be4d0470174b22c`; post-merge [workflow run 44457198010](https://github.com/kavianpcx/ledgerline/actions/runs/44457198010) passed analysis, all ten test suites, the Windows release build, installer packaging, and UI evidence capture. The screenshots were captured but not manually reviewed, so visual acceptance remains open.
+PRs #3 through #12 are merged into `main`. PR #12's merge commit is `76c7ef26b392fe25e9996f7a96d9350d34f04136`; [PR workflow run 44460386249](https://github.com/kavianpcx/ledgerline/actions/runs/44460386249) and post-merge [run 44462022534](https://github.com/kavianpcx/ledgerline/actions/runs/44462022534) passed analysis, all ten test suites, the Windows release build, installer packaging, smoke-install/startup, and UI evidence capture. The screenshots were captured but not manually pixel-reviewed, so visual acceptance remains open.
 
-The POS supports split cash and bank-transfer tenders, invoice payment history, receipt-to-journal reconciliation, a saved default tax rate, and invoice discounts. Schema v7 links older receipts only when the journal match is exact; unmatched history remains flagged for review. These changes are not part of the published Windows release. PR #12 is implementing full-invoice returns and refunds with stock and ledger reversals; partial-line returns are still open.
+The POS supports split cash and bank-transfer tenders, invoice payment history, receipt-to-journal reconciliation, a saved default tax rate, invoice discounts, and full-invoice returns with stock and ledger reversals. Schema v7 links older receipts only when the journal match is exact; unmatched history remains flagged for review. These changes are not part of the published Windows release. Partial-line returns remain open.
 
 ## Known limitations
 
-Ledgerline is not production-ready. The Android application, secure roles and authentication, multi-device synchronization, complete multi-currency accounting, restaurant table/kitchen workflows, partial-line returns, printable invoices and thermal receipts, POS shortcuts and customer records, multi-warehouse purchasing/transfers, XLSX/DOCX/PDF import, encrypted backups, payroll/tax rules, market data, and a complete updater remain unfinished. Full-invoice returns are being validated in PR #12 and are not part of `main` or the published release. The product requirements stay active; see the audit for risks and implementation status.
+Ledgerline is not production-ready. The Android application, secure roles and authentication, multi-device synchronization, complete multi-currency accounting, restaurant table/kitchen workflows, partial-line returns, printable invoices and thermal receipts, POS shortcuts and customer records, product images, XLSX/DOCX/PDF import, encrypted backups, payroll/tax rules, market data, and a complete updater remain unfinished. Product photos and built-in icons are being implemented in PR #13; that work is not part of `main` or the published release. The product requirements stay active; see the audit for risks and implementation status.
 
 ## Install the verified Windows release
 

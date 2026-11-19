@@ -17,6 +17,20 @@ class LedgerRepository {
   LedgerRepository(this._database);
 
   static const Set<String> _allowedPaymentMethods = {'cash', 'bank_transfer'};
+  static const List<String> _productColumns = [
+    'id',
+    'sku',
+    'name',
+    'unit_price_cents',
+    'unit_cost_cents',
+    'stock_quantity',
+    'created_at',
+    'updated_at',
+    'description',
+    'category',
+    'barcode',
+    'icon_key',
+  ];
 
   LedgerDatabase _database;
 
@@ -108,7 +122,11 @@ class LedgerRepository {
       LIMIT 200
     ''');
     final entries = entryRows.map(LedgerEntry.fromRow).toList(growable: false);
-    final productRows = await db.query('products', orderBy: 'name COLLATE NOCASE ASC');
+    final productRows = await db.query(
+      'products',
+      columns: _productColumns,
+      orderBy: 'name COLLATE NOCASE ASC',
+    );
     final products = productRows.map(Product.fromRow).toList(growable: false);
     final invoiceRows = await db.rawQuery('''
       SELECT i.*, COALESCE(SUM(p.amount_cents), 0) AS paid_cents
@@ -312,6 +330,7 @@ class LedgerRepository {
   Future<List<Product>> loadProducts() async {
     final rows = await _database.handle.query(
       'products',
+      columns: _productColumns,
       orderBy: 'name COLLATE NOCASE ASC, id ASC',
     );
     return rows.map(Product.fromRow).toList(growable: false);
@@ -330,6 +349,7 @@ class LedgerRepository {
       final ids = productIds.sublist(start, end).toSet().toList(growable: false);
       final rows = await _database.handle.query(
         'products',
+        columns: _productColumns,
         where: 'id IN (' + List.filled(ids.length, '?').join(',') + ')',
         whereArgs: ids,
       );
@@ -343,6 +363,7 @@ class LedgerRepository {
     if (normalizedBarcode.isEmpty) return null;
     final rows = await _database.handle.query(
       'products',
+      columns: _productColumns,
       where: 'barcode = ?',
       whereArgs: [normalizedBarcode],
       limit: 1,
@@ -467,6 +488,8 @@ class LedgerRepository {
         'unit_price_cents': draft.unitPriceCents,
         'unit_cost_cents': draft.unitCostCents,
         'stock_quantity': draft.stockQuantity,
+        'icon_key': draft.iconKey ?? 'inventory',
+        'image_bytes': draft.imageBytes,
         'created_at': timestamp,
         'updated_at': timestamp,
       });
@@ -505,6 +528,7 @@ class LedgerRepository {
       await _requireAccountingCurrency(txn);
       final rows = await txn.query(
         'products',
+        columns: [..._productColumns, 'image_bytes'],
         where: 'id = ?',
         whereArgs: [productId],
         limit: 1,
@@ -519,18 +543,25 @@ class LedgerRepository {
       }
       final inventoryValueDelta = costDelta * current.stockQuantity;
 
+      final updateValues = <String, Object?>{
+        'sku': draft.sku.trim().toUpperCase(),
+        'name': draft.name.trim(),
+        'description': draft.description.trim(),
+        'category': draft.category.trim(),
+        'barcode': draft.barcode.trim(),
+        'unit_price_cents': draft.unitPriceCents,
+        'unit_cost_cents': draft.unitCostCents,
+        'icon_key': draft.iconKey ?? current.iconKey,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
+      if (draft.imageBytes != null) {
+        updateValues['image_bytes'] = draft.imageBytes;
+      } else if (draft.clearImage) {
+        updateValues['image_bytes'] = null;
+      }
       await txn.update(
         'products',
-        {
-          'sku': draft.sku.trim().toUpperCase(),
-          'name': draft.name.trim(),
-          'description': draft.description.trim(),
-          'category': draft.category.trim(),
-          'barcode': draft.barcode.trim(),
-          'unit_price_cents': draft.unitPriceCents,
-          'unit_cost_cents': draft.unitCostCents,
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
-        },
+        updateValues,
         where: 'id = ?',
         whereArgs: [productId],
       );
@@ -568,13 +599,31 @@ class LedgerRepository {
     if (draft.barcode.trim().contains(RegExp(r'\s'))) {
       throw ArgumentError('Barcode cannot contain whitespace.');
     }
+    if (draft.iconKey != null && !productIconKeys.contains(draft.iconKey)) {
+      throw ArgumentError.value(draft.iconKey, 'iconKey', 'Choose a built-in icon.');
+    }
+    if (draft.clearImage && draft.imageBytes != null) {
+      throw ArgumentError('A product image cannot be both replaced and removed.');
+    }
+    if (draft.imageBytes != null &&
+        (draft.imageBytes!.isEmpty ||
+            draft.imageBytes!.length > productImageMaxBytes)) {
+      throw ArgumentError(
+        'Product images must contain data and be no larger than 512 KiB.',
+      );
+    }
   }
 
   Future<void> adjustStock(String productId, int delta) async {
     if (delta == 0) throw ArgumentError('Stock adjustment cannot be zero.');
     await _database.handle.transaction((txn) async {
       await _requireAccountingCurrency(txn);
-      final rows = await txn.query('products', where: 'id = ?', whereArgs: [productId]);
+      final rows = await txn.query(
+        'products',
+        columns: _productColumns,
+        where: 'id = ?',
+        whereArgs: [productId],
+      );
       if (rows.isEmpty) throw ArgumentError('Product not found.');
       final product = Product.fromRow(rows.first);
       if (product.stockQuantity + delta < 0) {
@@ -704,6 +753,7 @@ class LedgerRepository {
         }
         final rows = await txn.query(
           'products',
+          columns: _productColumns,
           where: 'id = ?',
           whereArgs: [line.productId],
         );
@@ -1074,6 +1124,7 @@ class LedgerRepository {
         }
         final productRows = await txn.query(
           'products',
+          columns: _productColumns,
           where: 'id = ?',
           whereArgs: [productId],
           limit: 1,
