@@ -61,12 +61,12 @@ class InvoicePrintService {
           _invoiceDetails(invoice, isPersian, isThermal),
           pw.SizedBox(height: isThermal ? 8 : 18),
           if (isThermal)
-            _receiptLines(invoice, currencyCode, textDirection, isPersian)
+            _receiptLines(invoice, currencyCode, isPersian)
           else
-            _invoiceLines(invoice, currencyCode, textDirection, isPersian),
+            _invoiceLines(invoice, currencyCode, isPersian),
           pw.SizedBox(height: 8),
           pw.Divider(color: PdfColors.grey500),
-          _summary(invoice, currencyCode, textDirection, isPersian),
+          _summary(invoice, currencyCode, isPersian),
           if (invoice.isReturned) ...[
             pw.SizedBox(height: 10),
             pw.Text(
@@ -172,7 +172,7 @@ class InvoicePrintService {
   pw.Widget _invoiceLines(
     InvoicePrintData invoice,
     String currencyCode,
-    pw.TextDirection direction,
+
     bool isPersian,
   ) =>
       pw.Column(
@@ -183,7 +183,7 @@ class InvoicePrintService {
             _text(isPersian, 'quantity'),
             _text(isPersian, 'unitPrice'),
             _text(isPersian, 'lineTotal'),
-            direction,
+
             isHeader: true,
           ),
           pw.Divider(color: PdfColors.grey500),
@@ -193,7 +193,7 @@ class InvoicePrintService {
               line.quantity.toString(),
               _money(line.unitPriceCents, currencyCode),
               _money(line.lineTotalCents, currencyCode),
-              direction,
+
             ),
         ],
       );
@@ -203,7 +203,7 @@ class InvoicePrintService {
     String quantity,
     String unitPrice,
     String lineTotal,
-    pw.TextDirection direction, {
+    {
     bool isHeader = false,
   }) =>
       pw.Container(
@@ -216,7 +216,7 @@ class InvoicePrintService {
                 ),
               ),
         child: pw.Row(
-          textDirection: direction,
+
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             pw.Expanded(
@@ -265,7 +265,7 @@ class InvoicePrintService {
   pw.Widget _receiptLines(
     InvoicePrintData invoice,
     String currencyCode,
-    pw.TextDirection direction,
+
     bool isPersian,
   ) =>
       pw.Column(
@@ -278,7 +278,7 @@ class InvoicePrintService {
             ),
             pw.SizedBox(height: 2),
             pw.Row(
-              textDirection: direction,
+
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
                 pw.Expanded(
@@ -303,7 +303,7 @@ class InvoicePrintService {
   pw.Widget _summary(
     InvoicePrintData invoice,
     String currencyCode,
-    pw.TextDirection direction,
+
     bool isPersian,
   ) =>
       pw.Column(
@@ -312,35 +312,35 @@ class InvoicePrintService {
           _summaryRow(
             _text(isPersian, 'subtotal'),
             _money(invoice.subtotalCents, currencyCode),
-            direction,
+
           ),
           if (invoice.discountCents > 0)
             _summaryRow(
               _text(isPersian, 'discount'),
               '-${_money(invoice.discountCents, currencyCode)}',
-              direction,
+
             ),
           _summaryRow(
             _text(isPersian, 'tax'),
             _money(invoice.taxCents, currencyCode),
-            direction,
+
           ),
           pw.SizedBox(height: 4),
           _summaryRow(
             _text(isPersian, 'total'),
             _money(invoice.totalCents, currencyCode),
-            direction,
+
             bold: true,
           ),
           _summaryRow(
             _text(isPersian, 'paid'),
             _money(invoice.paidCents, currencyCode),
-            direction,
+
           ),
           _summaryRow(
             _text(isPersian, 'balanceDue'),
             _money(invoice.balanceDueCents, currencyCode),
-            direction,
+
             bold: true,
           ),
         ],
@@ -349,13 +349,13 @@ class InvoicePrintService {
   pw.Widget _summaryRow(
     String label,
     String value,
-    pw.TextDirection direction, {
+    {
     bool bold = false,
   }) =>
       pw.Padding(
         padding: const pw.EdgeInsets.symmetric(vertical: 2),
         child: pw.Row(
-          textDirection: direction,
+
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
             pw.Expanded(
