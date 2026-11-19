@@ -636,7 +636,7 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
                 expectedUnitPriceCents: line.product.unitPriceCents,
               ),
           ],
-          paymentAmountCents: request.collectPaymentNow ? total : 0,
+          paymentAmountCents: request.paymentAmountCents,
           paymentMethod: request.paymentMethod,
         ),
       );
@@ -649,7 +649,14 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
       await _loadProducts(pageIndex: _pageIndex);
       if (mounted) {
         _notify(
-          tr(context, request.collectPaymentNow ? 'posSalePaid' : 'posSaleOnAccount'),
+          tr(
+            context,
+            request.paymentAmountCents == total
+                ? 'posSalePaid'
+                : request.paymentAmountCents > 0
+                    ? 'posSalePartiallyPaid'
+                    : 'posSaleOnAccount',
+          ),
         );
       }
     } on Object catch (error) {
@@ -684,12 +691,12 @@ class PosCartLine {
 class _PosCheckoutRequest {
   const _PosCheckoutRequest({
     required this.customerName,
-    required this.collectPaymentNow,
+    required this.paymentAmountCents,
     required this.paymentMethod,
   });
 
   final String customerName;
-  final bool collectPaymentNow;
+  final int paymentAmountCents;
   final String paymentMethod;
 }
 
@@ -713,10 +720,32 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
   );
   bool _collectPaymentNow = true;
   String _paymentMethod = 'cash';
+  final TextEditingController _paymentAmount = TextEditingController();
+
+  int get _displayedPaymentAmountCents {
+    if (!_collectPaymentNow) return 0;
+    final amount = CurrencyDefinition.parseMinorUnits(
+      _paymentAmount.text,
+      currencyCode: widget.currencyCode,
+    );
+    if (amount == null || amount < 0) return 0;
+    return amount > widget.totalCents ? widget.totalCents : amount;
+  }
+
+  int get _balanceDueCents =>
+      widget.totalCents - _displayedPaymentAmountCents;
+
+  @override
+  void initState() {
+    super.initState();
+    _paymentAmount.text = CurrencyDefinition.of(widget.currencyCode)
+        .formatInput(widget.totalCents);
+  }
 
   @override
   void dispose() {
     _customerName.dispose();
+    _paymentAmount.dispose();
     super.dispose();
   }
 
@@ -753,6 +782,33 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
                 ),
                 if (_collectPaymentNow) ...[
                   const SizedBox(height: 8),
+                  TextFormField(
+                    key: const Key('pos-payment-amount'),
+                    controller: _paymentAmount,
+                    keyboardType: TextInputType.numberWithOptions(
+                      decimal: CurrencyDefinition.of(widget.currencyCode)
+                              .minorUnitExponent >
+                          0,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: tr(context, 'posPaymentAmount'),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                    validator: (value) {
+                      final amount = CurrencyDefinition.parseMinorUnits(
+                        value ?? '',
+                        currencyCode: widget.currencyCode,
+                      );
+                      if (amount == null || amount <= 0) {
+                        return tr(context, 'posPaymentAmountInvalid');
+                      }
+                      if (amount > widget.totalCents) {
+                        return tr(context, 'posPaymentAmountExceeds');
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
                     key: const Key('pos-payment-method'),
                     initialValue: _paymentMethod,
@@ -787,6 +843,18 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(child: Text(tr(context, 'posBalanceDue'))),
+                    Text(
+                      CurrencyDefinition.of(widget.currencyCode)
+                          .formatMinorUnits(_balanceDueCents),
+                      key: const Key('pos-balance-due'),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -809,7 +877,12 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
     Navigator.of(context).pop(
       _PosCheckoutRequest(
         customerName: _customerName.text.trim(),
-        collectPaymentNow: _collectPaymentNow,
+        paymentAmountCents: _collectPaymentNow
+            ? CurrencyDefinition.parseMinorUnits(
+                _paymentAmount.text,
+                currencyCode: widget.currencyCode,
+              )!
+            : 0,
         paymentMethod: _paymentMethod,
       ),
     );
