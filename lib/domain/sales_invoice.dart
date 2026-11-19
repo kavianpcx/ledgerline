@@ -42,6 +42,20 @@ class InvoiceDraft {
   final List<InvoiceTenderDraft> additionalPayments;
 }
 
+class InvoiceReturnDraft {
+  const InvoiceReturnDraft({
+    required this.invoiceId,
+    required this.date,
+    required this.reason,
+    this.refundMethod = 'cash',
+  });
+
+  final String invoiceId;
+  final DateTime date;
+  final String reason;
+  final String refundMethod;
+}
+
 class InvoicePaymentDraft {
   const InvoicePaymentDraft({
     required this.invoiceId,
@@ -76,6 +90,24 @@ class InvoicePaymentRecord {
   final bool ledgerPostingMatches;
 }
 
+class InvoiceReturnRecord {
+  const InvoiceReturnRecord({
+    required this.returnDate,
+    required this.reason,
+    required this.refundAmountCents,
+    required this.refundMethod,
+    required this.journalEntryId,
+    required this.ledgerPostingMatches,
+  });
+
+  final DateTime returnDate;
+  final String reason;
+  final int refundAmountCents;
+  final String refundMethod;
+  final String? journalEntryId;
+  final bool ledgerPostingMatches;
+}
+
 class InvoicePaymentHistory {
   const InvoicePaymentHistory({
     required this.invoiceId,
@@ -84,6 +116,8 @@ class InvoicePaymentHistory {
     required this.invoiceStatus,
     required this.invoiceTotalCents,
     required this.payments,
+    required this.returnRecordExpected,
+    this.returnRecord,
   });
 
   final String invoiceId;
@@ -92,12 +126,16 @@ class InvoicePaymentHistory {
   final String invoiceStatus;
   final int invoiceTotalCents;
   final List<InvoicePaymentRecord> payments;
+  final bool returnRecordExpected;
+  final InvoiceReturnRecord? returnRecord;
 
   int get recordedCents =>
       payments.fold<int>(0, (sum, payment) => sum + payment.amountCents);
 
   int get balanceDueCents =>
-      invoiceTotalCents > recordedCents ? invoiceTotalCents - recordedCents : 0;
+      returnRecordExpected || invoiceTotalCents <= recordedCents
+          ? 0
+          : invoiceTotalCents - recordedCents;
 
   bool get invoiceStatusMatchesPayments {
     if (invoiceStatus == 'void') return recordedCents == 0;
@@ -108,7 +146,10 @@ class InvoicePaymentHistory {
   }
 
   bool get journalPostingsMatch =>
-      payments.every((payment) => payment.ledgerPostingMatches);
+      payments.every((payment) => payment.ledgerPostingMatches) &&
+      (returnRecordExpected
+          ? returnRecord?.ledgerPostingMatches == true
+          : returnRecord == null);
 
   bool get isReconciled =>
       invoiceStatusMatchesPayments && journalPostingsMatch;
@@ -124,6 +165,7 @@ class SalesInvoice {
     required this.subtotalCents,
     required this.taxCents,
     this.discountCents = 0,
+    this.returnedAt,
     required this.totalCents,
     required this.paidCents,
   });
@@ -136,11 +178,14 @@ class SalesInvoice {
   final int subtotalCents;
   final int taxCents;
   final int discountCents;
+  final DateTime? returnedAt;
   final int totalCents;
+
+  bool get isReturned => returnedAt != null;
   final int paidCents;
 
   int get balanceDueCents =>
-      totalCents > paidCents ? totalCents - paidCents : 0;
+      isReturned || totalCents <= paidCents ? 0 : totalCents - paidCents;
 
   factory SalesInvoice.fromRow(Map<String, Object?> row) {
     final status = row['status']! as String;
@@ -156,6 +201,9 @@ class SalesInvoice {
       subtotalCents: row['subtotal_cents']! as int,
       taxCents: row['tax_cents']! as int,
       discountCents: row['discount_cents'] as int? ?? 0,
+      returnedAt: row['returned_at'] == null
+          ? null
+          : DateTime.tryParse(row['returned_at']! as String),
       totalCents: totalCents,
       paidCents: paidCents,
     );
