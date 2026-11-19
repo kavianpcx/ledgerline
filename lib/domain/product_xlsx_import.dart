@@ -62,7 +62,7 @@ class ProductXlsxImport {
       throw const FormatException('The worksheet needs a header and at least one product row.');
     }
     return rows
-        .join('\\r\\n');
+        .join('\r\n');
         .join('\\r\\n');
   }
 
