@@ -12,6 +12,7 @@ const _destinations = <LedgerNavDestination>[
   ('reports', Icons.analytics_rounded, Icons.analytics_outlined),
   ('smartImport', Icons.file_upload_outlined, Icons.file_upload_outlined),
   ('settings', Icons.settings_rounded, Icons.settings_outlined),
+  ('pointOfSale', Icons.shopping_cart_rounded, Icons.shopping_cart_outlined),
   ('more', Icons.more_horiz_rounded, Icons.more_horiz_outlined),
 ];
 
@@ -82,6 +83,7 @@ void main() {
     expect(find.byKey(const Key('ledgerline-desktop-sidebar')), findsOneWidget);
     expect(find.text('Accounting'), findsOneWidget);
     expect(find.text('Products'), findsOneWidget);
+    expect(find.text('Point of Sale'), findsOneWidget);
 
     await tester.enterText(find.byKey(const Key('desktop-sidebar-search-field')), 'Products');
     await tester.pumpAndSettle();
@@ -89,6 +91,34 @@ void main() {
     expect(find.byKey(const Key('desktop-sidebar-destination-1')), findsNothing);
     await tester.tap(find.byKey(const Key('desktop-sidebar-destination-3')));
     expect(selected, [3]);
+  });
+
+  testWidgets('point of sale appears in the Sales group and stays searchable', (tester) async {
+    final selected = <int>[];
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Row(
+          children: [
+            LedgerDesktopSidebar(
+              destinations: _destinations,
+              selectedIndex: 0,
+              collapsed: false,
+              onDestinationSelected: selected.add,
+              onCollapsedChanged: (_) {},
+            ),
+            const Expanded(child: SizedBox()),
+          ],
+        ),
+      ),
+    ));
+
+    expect(find.text('Sales'), findsOneWidget);
+    expect(find.text('Point of Sale'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('desktop-sidebar-search-field')), 'point of sale');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('desktop-sidebar-destination-8')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('desktop-sidebar-destination-8')));
+    expect(selected, [8]);
   });
 
   testWidgets('very narrow sidebar keeps navigation without a nonfunctional expand control', (tester) async {

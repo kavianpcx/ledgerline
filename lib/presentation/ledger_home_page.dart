@@ -19,12 +19,14 @@ import '../domain/accounting_engine.dart';
 import '../domain/ledger_entry.dart';
 import '../domain/money.dart';
 import '../domain/product.dart';
+import '../domain/stock_movement.dart';
 import '../domain/product_csv_import.dart';
 import '../domain/sales_invoice.dart';
 import '../services/offline_ocr_service.dart';
 import '../services/update_service.dart';
 import 'app_strings.dart';
 import 'widgets/searchable_select.dart';
+import 'pos_page.dart';
 
 class LedgerHomePage extends StatefulWidget {
   const LedgerHomePage({
@@ -64,6 +66,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   int _productPageSize = 25;
   String _productSortBy = 'name';
   bool _productSortAscending = true;
+  final Map<String, PosCartLine> _posCart = {};
 
   static const _destinations = <(String, IconData, IconData)>[
     ('overview', Icons.grid_view_rounded, Icons.grid_view_outlined),
@@ -74,6 +77,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     ('reports', Icons.analytics_rounded, Icons.analytics_outlined),
     ('smartImport', Icons.file_upload_outlined, Icons.file_upload_outlined),
     ('settings', Icons.settings_rounded, Icons.settings_outlined),
+    ('pointOfSale', Icons.shopping_cart_rounded, Icons.shopping_cart_outlined),
     ('more', Icons.more_horiz_rounded, Icons.more_horiz_outlined),
   ];
 
@@ -356,6 +360,14 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     }
   }
 
+  Future<void> _showStockMovementHistory(Product product) => showDialog<void>(
+        context: context,
+        builder: (context) => _StockMovementHistoryDialog(
+          repository: widget.repository,
+          product: product,
+        ),
+      );
+
   Future<void> _addInvoice(LedgerSnapshot snapshot) async {
     if (!_requireAccountingCurrency()) return;
     if (snapshot.products.isEmpty) {
@@ -574,8 +586,8 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         final contentWidth = (constraints.maxWidth - navigationWidth).clamp(0.0, constraints.maxWidth).toDouble();
         final navIndex = switch (_selectedIndex) {
           0 => 0,
-          1 => 1,
-          4 => 2,
+          8 => 1,
+          3 => 2,
           _ => 3,
         };
         final scaffold = Scaffold(
@@ -733,10 +745,10 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                   key: const Key('ledgerline-bottom-navigation'),
                   selectedIndex: navIndex,
                   onDestinationSelected: (index) => setState(() {
-                    _selectedIndex = switch (index) { 0 => 0, 1 => 1, 2 => 4, _ => 8 };
+                    _selectedIndex = switch (index) { 0 => 0, 1 => 8, 2 => 3, _ => 9 };
                   }),
                   destinations: [
-                    for (final index in [0, 1, 4, 8])
+                    for (final index in [0, 8, 3, 9])
                       NavigationDestination(
                         icon: Icon(_destinations[index].$3),
                         selectedIcon: Icon(_destinations[index].$2),
@@ -763,6 +775,18 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
       5 => _reports(snapshot),
       6 => _smartImport(snapshot),
       7 => _settingsPage(snapshot),
+      8 => PointOfSalePage(
+          repository: widget.repository,
+          currencyCode: widget.settings.currencyCode,
+          beforeCheckout: _requireAccountingCurrency,
+          initialCart: _posCart,
+          onCartChanged: (cart) {
+            _posCart
+              ..clear()
+              ..addAll(cart);
+          },
+          onCheckoutCompleted: _reload,
+        ),
       _ => _more(snapshot),
     };
     return ListView(
@@ -1037,6 +1061,12 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                     ),
                   ),
                   IconButton(
+                    key: ValueKey('product-stock-history-${product.sku}'),
+                    tooltip: tr(context, 'stockHistory'),
+                    onPressed: () => _showStockMovementHistory(product),
+                    icon: const Icon(Icons.history_rounded),
+                  ),
+                  IconButton(
                     tooltip: tr(context, 'restock'),
                     onPressed: () => _adjustStock(product, 1),
                     icon: const Icon(Icons.add_circle_outline),
@@ -1064,10 +1094,21 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
           const SizedBox(height: 16),
           Align(
             alignment: AlignmentDirectional.centerEnd,
-            child: FilledButton.icon(
-              onPressed: () => _addInvoice(snapshot),
-              icon: const Icon(Icons.add_rounded),
-              label: Text(tr(context, 'newInvoice')),
+            child: Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: () => setState(() => _selectedIndex = 8),
+                  icon: const Icon(Icons.shopping_cart_outlined),
+                  label: Text(tr(context, 'pointOfSale')),
+                ),
+                FilledButton.icon(
+                  onPressed: () => _addInvoice(snapshot),
+                  icon: const Icon(Icons.add_rounded),
+                  label: Text(tr(context, 'newInvoice')),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 12),
@@ -1371,6 +1412,11 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                   onPressed: () => setState(() => _selectedIndex = 4),
                   icon: const Icon(Icons.receipt_long_outlined),
                   label: Text(tr(context, 'openInvoices')),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: () => setState(() => _selectedIndex = 8),
+                  icon: const Icon(Icons.shopping_cart_outlined),
+                  label: Text(tr(context, 'pointOfSale')),
                 ),
                 OutlinedButton.icon(
                   onPressed: () => _addInvoice(snapshot),
@@ -1882,6 +1928,151 @@ class _EntryDialogState extends State<_EntryDialog> {
       CurrencyDefinition.parseMinorUnits(
         raw,
         currencyCode: currencyCode,
+      );
+}
+
+class _StockMovementHistoryDialog extends StatefulWidget {
+  const _StockMovementHistoryDialog({
+    required this.repository,
+    required this.product,
+  });
+
+  final LedgerRepository repository;
+  final Product product;
+
+  @override
+  State<_StockMovementHistoryDialog> createState() =>
+      _StockMovementHistoryDialogState();
+}
+
+class _StockMovementHistoryDialogState
+    extends State<_StockMovementHistoryDialog> {
+  static const _pageSize = 25;
+  late Future<StockMovementPage> _pageFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageFuture = _loadPage(0);
+  }
+
+  Future<StockMovementPage> _loadPage(int pageIndex) =>
+      widget.repository.loadStockMovementPage(
+        productId: widget.product.id,
+        pageIndex: pageIndex,
+        pageSize: _pageSize,
+      );
+
+  void _showPage(int pageIndex) {
+    setState(() => _pageFuture = _loadPage(pageIndex));
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text('${tr(context, 'stockMovementHistory')} · ${widget.product.name}'),
+        content: SizedBox(
+          width: 560,
+          height: 400,
+          child: FutureBuilder<StockMovementPage>(
+            future: _pageFuture,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Center(
+                  child: Text(
+                    tr(context, 'stockMovementLoadFailed') +
+                        ': ${snapshot.error}',
+                  ),
+                );
+              }
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final page = snapshot.data!;
+              if (page.totalCount == 0) {
+                return Center(child: Text(tr(context, 'noStockMovements')));
+              }
+              return Column(
+                children: [
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: page.movements.length,
+                      separatorBuilder: (context, index) =>
+                          const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final movement = page.movements[index];
+                        final isIncrease = movement.quantityDelta > 0;
+                        final timestamp = movement.recordedAt
+                            .toLocal()
+                            .toString()
+                            .split('.')
+                            .first;
+                        final label = switch (movement.movementType) {
+                          'opening_balance' =>
+                            tr(context, 'stockOpeningBalance'),
+                          'adjustment' => tr(context, 'stockAdjustment'),
+                          'sale' => tr(context, 'stockSale'),
+                          'migration_balance' =>
+                            tr(context, 'stockMigrationBalance'),
+                          _ => movement.movementType,
+                        };
+                        return ListTile(
+                          dense: true,
+                          leading: Icon(
+                            isIncrease
+                                ? Icons.add_circle_outline
+                                : Icons.remove_circle_outline,
+                            color: isIncrease
+                                ? Theme.of(context).colorScheme.tertiary
+                                : Theme.of(context).colorScheme.error,
+                          ),
+                          title: Text(label),
+                          subtitle: Text('${movement.description} · $timestamp'),
+                          trailing: Text(
+                            '${isIncrease ? '+' : ''}${movement.quantityDelta}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: isIncrease
+                                  ? Theme.of(context).colorScheme.tertiary
+                                  : Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        key: const Key('stock-history-previous-page'),
+                        tooltip: tr(context, 'previousPage'),
+                        onPressed: page.pageIndex == 0
+                            ? null
+                            : () => _showPage(page.pageIndex - 1),
+                        icon: const Icon(Icons.chevron_left_rounded),
+                      ),
+                      Text('${page.pageIndex + 1} / ${page.pageCount}'),
+                      IconButton(
+                        key: const Key('stock-history-next-page'),
+                        tooltip: tr(context, 'nextPage'),
+                        onPressed: page.pageIndex + 1 >= page.pageCount
+                            ? null
+                            : () => _showPage(page.pageIndex + 1),
+                        icon: const Icon(Icons.chevron_right_rounded),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(tr(context, 'stockHistoryClose')),
+          ),
+        ],
       );
 }
 

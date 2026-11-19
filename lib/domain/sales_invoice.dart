@@ -1,8 +1,13 @@
 class InvoiceLineDraft {
-  const InvoiceLineDraft({required this.productId, required this.quantity});
+  const InvoiceLineDraft({
+    required this.productId,
+    required this.quantity,
+    this.expectedUnitPriceCents,
+  });
 
   final String productId;
   final int quantity;
+  final int? expectedUnitPriceCents;
 }
 
 class InvoiceDraft {
@@ -11,12 +16,16 @@ class InvoiceDraft {
     required this.date,
     required this.lines,
     this.taxCents = 0,
+    this.paymentAmountCents = 0,
+    this.paymentMethod = 'cash',
   });
 
   final String customerName;
   final DateTime date;
   final List<InvoiceLineDraft> lines;
   final int taxCents;
+  final int paymentAmountCents;
+  final String paymentMethod;
 }
 
 class InvoicePaymentDraft {
@@ -24,11 +33,13 @@ class InvoicePaymentDraft {
     required this.invoiceId,
     required this.amountCents,
     required this.date,
+    this.paymentMethod = 'cash',
   });
 
   final String invoiceId;
   final int amountCents;
   final DateTime date;
+  final String paymentMethod;
 }
 
 class SalesInvoice {
