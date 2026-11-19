@@ -132,6 +132,7 @@ class InvoicePrintData {
     required this.paidCents,
     required this.isReturned,
     required this.lines,
+    this.returnedCents = 0,
   });
 
   final String invoiceNumber;
@@ -145,9 +146,12 @@ class InvoicePrintData {
   final int paidCents;
   final bool isReturned;
   final List<InvoicePrintLine> lines;
+  final int returnedCents;
 
-  int get balanceDueCents =>
-      totalCents <= paidCents ? 0 : totalCents - paidCents;
+  int get balanceDueCents {
+    final remainingValue = totalCents - returnedCents;
+    return remainingValue <= paidCents ? 0 : remainingValue - paidCents;
+  }
 }
 
 class InvoicePaymentRecord {
