@@ -168,6 +168,15 @@ jobs:
             [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr handle);
             [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr handle);
             [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr handle);
+            [StructLayout(LayoutKind.Sequential)] public struct WindowRect {
+              public int Left; public int Top; public int Right; public int Bottom;
+            }
+            [DllImport("user32.dll", SetLastError = true)] public static extern bool GetWindowRect(IntPtr handle, out WindowRect rectangle);
+            public static int[] GetWindowBounds(IntPtr handle) {
+              WindowRect rectangle;
+              if (!GetWindowRect(handle, out rectangle)) return null;
+              return new int[] { rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top };
+            }
             [DllImport("user32.dll", SetLastError = true)] public static extern bool MoveWindow(IntPtr handle, int x, int y, int width, int height, bool repaint);
             [StructLayout(LayoutKind.Sequential)] public struct Input {
               public uint type;
@@ -200,6 +209,76 @@ jobs:
             }
           }
           "@
+          $evidenceDirectory = Join-Path $PWD 'ui-evidence'
+          New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
+          $releaseOcrDirectory = Join-Path $PWD 'build/windows/x64/runner/Release/ocr'
+          $tesseractPath = Join-Path $releaseOcrDirectory 'tesseract.exe'
+          $tessdataDirectory = Join-Path $releaseOcrDirectory 'tessdata'
+          if (-not (Test-Path -LiteralPath $tesseractPath)) { throw 'The bundled Tesseract executable is missing from the Windows release build.' }
+          foreach ($languageModel in @('eng', 'fas')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $tessdataDirectory ($languageModel + '.traineddata')))) {
+              throw "The bundled $languageModel OCR model is missing."
+            }
+          }
+          $evidenceReport = Join-Path $evidenceDirectory 'capture-verification.txt'
+          Set-Content -Path $evidenceReport -Value ('commit=' + $env:GITHUB_SHA) -Encoding utf8
+
+          function Assert-VisibleUiText {
+            param([string]$ImagePath, [string]$Scenario)
+            $language = if ($Scenario -eq 'settings-fa') { 'fas+eng' } else { 'eng+fas' }
+            $recognized = (& $tesseractPath $ImagePath stdout --tessdata-dir $tessdataDirectory -l $language --psm 11 2>&1) -join [Environment]::NewLine
+            if ($LASTEXITCODE -ne 0) { throw "Tesseract could not inspect $Scenario. Output: $recognized" }
+            $expected = @(
+              switch ($Scenario) {
+                'titlebar' { 'Ledgerline'; 'Your books' }
+                'windows-sidebar-wide' { 'Ledgerline'; 'Products'; 'Your books' }
+                'windows-sidebar-medium' { 'Ledgerline'; 'Your books' }
+                'windows-sidebar-narrow' { 'Ledgerline'; 'Your books' }
+                'settings-light' { 'Ledgerline'; 'Settings'; 'General' }
+                'settings-dark' { 'Ledgerline'; 'Settings'; 'Appearance'; 'Dark mode' }
+                'settings-fa' { 'Ledgerline' }
+                'currency-popup' { 'Ledgerline'; 'Settings'; 'Search currencies'; 'US Dollar' }
+                'installer-launch' { 'Ledgerline'; 'Your books' }
+                default { throw "No visible-text expectations are defined for $Scenario." }
+              }
+            )
+            foreach ($expectedText in $expected) {
+              if ($recognized -notmatch [Regex]::Escape($expectedText)) {
+                throw "Visible text '$expectedText' was missing from $Scenario. OCR output: $recognized"
+              }
+            }
+            if ($Scenario -eq 'settings-fa' -and $recognized -notmatch 'زبان|منطقه') {
+              throw "Persian settings labels were missing from $Scenario. OCR output: $recognized"
+            }
+            Add-Content -Path $evidenceReport -Value ("scenario=" + $Scenario + "; expected=" + ($expected -join '|') + "; recognized=" + ($recognized -replace '[\r\n]+', ' ')) -Encoding utf8
+            Write-Host ("Verified visible text in " + $Scenario + ": " + ($recognized -replace '[\r\n]+', ' '))
+          }
+
+          function Save-WindowEvidence {
+            param([IntPtr]$WindowHandle, [string]$ImagePath, [string]$Scenario)
+            $windowBounds = [LedgerlineWindowTest]::GetWindowBounds($WindowHandle)
+            if ($null -eq $windowBounds) { throw "Could not read the window bounds for $Scenario." }
+            $screenBounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $left = [Math]::Max([int]$windowBounds[0], [int]$screenBounds.Left)
+            $top = [Math]::Max([int]$windowBounds[1], [int]$screenBounds.Top)
+            $right = [Math]::Min(([int]$windowBounds[0] + [int]$windowBounds[2]), [int]$screenBounds.Right)
+            $bottom = [Math]::Min(([int]$windowBounds[1] + [int]$windowBounds[3]), [int]$screenBounds.Bottom)
+            $width = $right - $left
+            $height = $bottom - $top
+            if ($width -lt 480 -or $height -lt 300) { throw "The visible $Scenario window area is too small to verify." }
+            $bitmap = [System.Drawing.Bitmap]::new($width, $height)
+            $graphics = $null
+            try {
+              $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+              $graphics.CopyFromScreen([System.Drawing.Point]::new($left, $top), [System.Drawing.Point]::Empty, [System.Drawing.Size]::new($width, $height))
+              $bitmap.Save($ImagePath, [System.Drawing.Imaging.ImageFormat]::Png)
+            } finally {
+              if ($null -ne $graphics) { $graphics.Dispose() }
+              $bitmap.Dispose()
+            }
+            Assert-VisibleUiText -ImagePath $ImagePath -Scenario $Scenario
+          }
+
           $smokeInstallDirectory = Join-Path $env:RUNNER_TEMP 'LedgerlineInstallerSmoke'
           $installerPath = Join-Path $PWD 'installer/output/ledgerline-windows-setup.exe'
           $setup = Start-Process -FilePath $installerPath -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$smokeInstallDirectory") -Wait -PassThru
@@ -211,17 +290,22 @@ jobs:
             Start-Sleep -Seconds 1
             $smokeProcess.Refresh()
             if ($smokeProcess.HasExited) { throw 'Installed Ledgerline exited during smoke-test startup.' }
-            if ($smokeProcess.MainWindowHandle -ne [IntPtr]::Zero) { break }
+            if ($smokeProcess.MainWindowHandle -ne [IntPtr]::Zero -and [LedgerlineWindowTest]::IsWindowVisible($smokeProcess.MainWindowHandle)) { break }
           }
           $smokeProcess.Refresh()
-          if ($smokeProcess.MainWindowHandle -eq [IntPtr]::Zero) { throw 'Installed Ledgerline did not create a Windows application window.' }
+          if ($smokeProcess.MainWindowHandle -eq [IntPtr]::Zero -or -not [LedgerlineWindowTest]::IsWindowVisible($smokeProcess.MainWindowHandle)) {
+            throw 'Installed Ledgerline did not create a visible Windows application window.'
+          }
           [LedgerlineWindowTest]::SetForegroundWindow($smokeProcess.MainWindowHandle) | Out-Null
-          Start-Sleep -Seconds 2
+          Start-Sleep -Seconds 3
+          if ([LedgerlineWindowTest]::GetForegroundWindow() -ne $smokeProcess.MainWindowHandle) { throw 'Installed Ledgerline was not the foreground window for its launch evidence.' }
+          $installedImage = Join-Path $evidenceDirectory 'installer-launch.png'
+          Save-WindowEvidence -WindowHandle $smokeProcess.MainWindowHandle -ImagePath $installedImage -Scenario 'installer-launch'
+          $installedHash = (Get-FileHash -LiteralPath $installedApplication -Algorithm SHA256).Hash
+          Add-Content -Path $evidenceReport -Value ('installed_exe_sha256=' + $installedHash) -Encoding utf8
           $smokeProcess.CloseMainWindow() | Out-Null
           if (-not $smokeProcess.WaitForExit(10000)) { throw 'Installed Ledgerline did not close cleanly after the smoke test.' }
           $smokeProcess.Dispose()
-          $evidenceDirectory = Join-Path $PWD 'ui-evidence'
-          New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
           $scenarios = @('titlebar', 'windows-sidebar-wide', 'windows-sidebar-medium', 'windows-sidebar-narrow', 'settings-light', 'settings-dark', 'settings-fa', 'currency-popup')
           foreach ($scenario in $scenarios) {
             Write-Host "Building visual scenario: $scenario"
@@ -289,13 +373,9 @@ jobs:
             }
             [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
             Start-Sleep -Seconds 3
-            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-            $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
-            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-            $bitmap.Save((Join-Path $evidenceDirectory ($scenario + '.png')), [System.Drawing.Imaging.ImageFormat]::Png)
-            $graphics.Dispose()
-            $bitmap.Dispose()
+            if ([LedgerlineWindowTest]::GetForegroundWindow() -ne $process.MainWindowHandle) { throw "$scenario was not the foreground window when its screenshot was captured." }
+            $imagePath = Join-Path $evidenceDirectory ($scenario + '.png')
+            Save-WindowEvidence -WindowHandle $process.MainWindowHandle -ImagePath $imagePath -Scenario $scenario
             $process.CloseMainWindow() | Out-Null
             if (-not $process.WaitForExit(10000)) { throw "Ledgerline did not close cleanly after capturing $scenario." }
             $process.Dispose()
@@ -308,9 +388,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ledgerline-ui-evidence
-          path: ui-evidence/*.png
+          path: ui-evidence/*
           if-no-files-found: error
 
+  # Public publishing intentionally requires an explicit marker on a main-branch push.
+  # Pull requests, feature branches, and manual builds only produce reviewable artifacts.
   publish-release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release]')
     needs: [analyze, test, windows]
