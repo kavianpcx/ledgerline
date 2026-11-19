@@ -740,7 +740,31 @@ class LedgerRepository {
         throw ArgumentError('Invoice total exceeds the supported integer range.');
       }
       final total = subtotal + draft.taxCents;
-      if (draft.paymentAmountCents > total) {
+      if (draft.paymentAmountCents == 0 && draft.additionalPayments.isNotEmpty) {
+        throw ArgumentError('Additional tenders require an initial payment.');
+      }
+      final paymentParts = <InvoiceTenderDraft>[
+        if (draft.paymentAmountCents > 0)
+          InvoiceTenderDraft(
+            amountCents: draft.paymentAmountCents,
+            paymentMethod: draft.paymentMethod,
+          ),
+        ...draft.additionalPayments,
+      ];
+      var collectedPaymentCents = 0;
+      for (final payment in paymentParts) {
+        if (payment.amountCents <= 0 ||
+            !_allowedPaymentMethods.contains(payment.paymentMethod)) {
+          throw ArgumentError(
+            'Payment tenders must have a positive amount and supported method.',
+          );
+        }
+        if (collectedPaymentCents > maxSignedInt - payment.amountCents) {
+          throw ArgumentError('Payment total exceeds the supported integer range.');
+        }
+        collectedPaymentCents += payment.amountCents;
+      }
+      if (collectedPaymentCents > total) {
         throw ArgumentError('Payment cannot exceed the invoice total.');
       }
 
@@ -759,7 +783,7 @@ class LedgerRepository {
         'invoice_number': invoiceNumber,
         'customer_name': draft.customerName.trim(),
         'issue_date': _dateOnly(draft.date),
-        'status': draft.paymentAmountCents == total ? 'paid' : 'issued',
+        'status': collectedPaymentCents == total ? 'paid' : 'issued',
         'subtotal_cents': subtotal,
         'tax_cents': draft.taxCents,
         'total_cents': total,
@@ -837,24 +861,28 @@ class LedgerRepository {
         });
       }
 
-      if (draft.paymentAmountCents > 0) {
+      for (var index = 0; index < paymentParts.length; index++) {
+        final payment = paymentParts[index];
+        final paymentId = index == 0
+            ? 'pos_payment_' + invoiceId
+            : 'pos_payment_' + invoiceId + '_' + index.toString();
         await txn.insert('invoice_payments', {
-          'id': 'pos_payment_' + invoiceId,
+          'id': paymentId,
           'invoice_id': invoiceId,
           'payment_date': _dateOnly(draft.date),
-          'amount_cents': draft.paymentAmountCents,
-          'payment_method': draft.paymentMethod,
+          'amount_cents': payment.amountCents,
+          'payment_method': payment.paymentMethod,
           'created_at': createdAt,
         });
         await _insertTwoLineJournalEntry(
           txn,
-          entryId: 'pos_payment_' + invoiceId,
+          entryId: paymentId,
           date: draft.date,
           description: 'Invoice payment · ' + invoiceNumber + ' · ' + draft.customerName.trim(),
           debitAccountId:
-              draft.paymentMethod == 'bank_transfer' ? 'bank' : 'cash',
+              payment.paymentMethod == 'bank_transfer' ? 'bank' : 'cash',
           creditAccountId: 'receivables',
-          amountCents: draft.paymentAmountCents,
+          amountCents: payment.amountCents,
         );
       }
     });

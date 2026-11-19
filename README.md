@@ -20,9 +20,9 @@ PR [#2](https://github.com/kavianpcx/ledgerline/pull/2) restored permanent left-
 
 ## Current source and development work
 
-PRs #3 through #7 are merged. Main is b37ece300e3d35d2231c3aa2049077c583d098f3. PR #7's [workflow run 44427000553](https://github.com/kavianpcx/ledgerline/actions/runs/44427000553) passed analysis, all ten test suites, Windows release packaging, installer smoke checks, and screenshot capture. Manual review found the application windows blank in the captures, so visual acceptance remains open.
+PRs #3 through #8 are merged into `main`. Main is `990e04a2ae015c1835b64fc28b230ed915802cdc`. Its post-merge [workflow run 44441447260](https://github.com/kavianpcx/ledgerline/actions/runs/44441447260) passed analyzer, all ten test suites, the Windows release build, installer packaging, and UI evidence capture. The screenshots were not manually reviewed, so visual acceptance remains open.
 
-The feature/pos-partial-payment branch adds an amount field in POS checkout, validates exact minor-unit input, and shows the remaining balance. Its widget and accounting tests are included in open [PR #8](https://github.com/kavianpcx/ledgerline/pull/8); CI is pending. This does not yet provide split tenders, payment reconciliation, refunds, tax/discount, or receipts.
+PR #8 adds a cashier-entered partial payment amount and remaining balance to POS checkout. The active `feature/pos-split-tenders` branch extends that flow to cash and bank-transfer split payments. It posts each tender in the existing invoice transaction and adds repository rollback/accounting tests and checkout widget coverage. Its [workflow run 44444262821](https://github.com/kavianpcx/ledgerline/actions/runs/44444262821) passed analyzer, all ten test suites, the Windows release build, and installer packaging. CI captured UI evidence, but the artifact was not manually reviewed. The change is under review in [PR #9](https://github.com/kavianpcx/ledgerline/pull/9).
 
 ## Known limitations
 
