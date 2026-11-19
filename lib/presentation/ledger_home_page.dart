@@ -485,6 +485,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     final draft = await showDialog<InvoiceReturnDraft>(
       context: context,
       builder: (context) => _InvoiceReturnDialog(
+        repository: widget.repository,
         invoice: invoice,
         currencyCode: widget.settings.currencyCode,
       ),
@@ -2764,10 +2765,12 @@ class _InvoiceDialogState extends State<_InvoiceDialog> {
 
 class _InvoiceReturnDialog extends StatefulWidget {
   const _InvoiceReturnDialog({
+    required this.repository,
     required this.invoice,
     required this.currencyCode,
   });
 
+  final LedgerRepository repository;
   final SalesInvoice invoice;
   final String currencyCode;
 
@@ -2778,7 +2781,17 @@ class _InvoiceReturnDialog extends StatefulWidget {
 class _InvoiceReturnDialogState extends State<_InvoiceReturnDialog> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _reasonController = TextEditingController();
+  late final Future<List<InvoiceReturnableLine>> _returnableLines;
+  final Map<int, int> _selectedQuantities = {};
   String _refundMethod = 'cash';
+  bool _selectionInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _returnableLines =
+        widget.repository.loadInvoiceReturnableLines(widget.invoice.id);
+  }
 
   @override
   void dispose() {
@@ -2786,98 +2799,265 @@ class _InvoiceReturnDialogState extends State<_InvoiceReturnDialog> {
     super.dispose();
   }
 
+  int _estimatedValue(InvoiceReturnableLine line, int quantity) {
+    if (quantity <= 0 || line.availableQuantity <= 0) return 0;
+    final numerator =
+        BigInt.from(line.remainingLineValueCents) * BigInt.from(quantity);
+    final denominator = BigInt.from(line.availableQuantity);
+    return ((numerator + BigInt.from(line.availableQuantity ~/ 2)) ~/
+            denominator)
+        .toInt();
+  }
+
   @override
-  Widget build(BuildContext context) => AlertDialog(
-        title: Text(tr(context, 'returnInvoiceTitle')),
-        content: SizedBox(
-          width: 440,
-          child: Form(
-            key: _formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(tr(context, 'returnInvoiceHint')),
-                  const SizedBox(height: 12),
-                  Text(
-                    tr(context, 'returnRefundAmount') +
-                        ': ' +
-                        CurrencyDefinition.of(widget.currencyCode)
-                            .formatMinorUnits(widget.invoice.paidCents),
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    tr(context, 'returnUnpaidCancellation') +
-                        ': ' +
-                        CurrencyDefinition.of(widget.currencyCode)
-                            .formatMinorUnits(widget.invoice.balanceDueCents),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    key: const Key('invoice-return-reason'),
-                    controller: _reasonController,
-                    maxLength: 500,
-                    minLines: 2,
-                    maxLines: 4,
-                    decoration: InputDecoration(
-                      labelText: tr(context, 'returnReason'),
+  Widget build(BuildContext context) => FutureBuilder<List<InvoiceReturnableLine>>(
+        future: _returnableLines,
+        builder: (context, result) {
+          if (result.connectionState != ConnectionState.done) {
+            return AlertDialog(
+              title: Text(tr(context, 'returnInvoiceTitle')),
+              content: const SizedBox(
+                width: 520,
+                height: 300,
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            );
+          }
+          if (result.hasError || result.data == null) {
+            return AlertDialog(
+              title: Text(tr(context, 'returnInvoiceTitle')),
+              content: SizedBox(
+                width: 520,
+                height: 180,
+                child: Center(
+                  child: Text(tr(context, 'paymentHistoryLoadFailed')),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(tr(context, 'cancel')),
+                ),
+              ],
+            );
+          }
+
+          final lines = result.data!;
+          if (!_selectionInitialized) {
+            for (final line in lines) {
+              _selectedQuantities[line.invoiceLineId] =
+                  line.productAvailable ? line.availableQuantity : 0;
+            }
+            _selectionInitialized = true;
+          }
+          final selectedCount = _selectedQuantities.values.fold<int>(
+            0,
+            (sum, quantity) => sum + quantity,
+          );
+          var estimatedReturnValue = 0;
+          for (final line in lines) {
+            estimatedReturnValue += _estimatedValue(
+              line,
+              _selectedQuantities[line.invoiceLineId] ?? 0,
+            );
+          }
+          final currency = CurrencyDefinition.of(widget.currencyCode);
+
+          return AlertDialog(
+            title: Text(tr(context, 'returnInvoiceTitle')),
+            content: SizedBox(
+              width: 520,
+              height: 540,
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(tr(context, 'returnInvoiceHint')),
+                    const SizedBox(height: 10),
+                    Text(
+                      tr(context, 'returnSelectItems'),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
-                    validator: (value) =>
-                        value == null || value.trim().isEmpty
-                            ? tr(context, 'returnReasonRequired')
-                            : null,
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    key: const Key('invoice-return-refund-method'),
-                    initialValue: _refundMethod,
-                    decoration: InputDecoration(
-                      labelText: tr(context, 'returnRefundMethod'),
+                    const SizedBox(height: 4),
+                    SizedBox(
+                      height: 212,
+                      child: lines.isEmpty
+                          ? Center(
+                              child: Text(tr(context, 'returnNoItemsAvailable')),
+                            )
+                          : ListView.separated(
+                              itemCount: lines.length,
+                              separatorBuilder: (context, index) =>
+                                  const Divider(height: 1),
+                              itemBuilder: (context, index) {
+                                final line = lines[index];
+                                final selected =
+                                    _selectedQuantities[line.invoiceLineId] ?? 0;
+                                final canSelect = line.productAvailable &&
+                                    line.availableQuantity > 0;
+                                return ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  dense: true,
+                                  title: Text(line.description),
+                                  subtitle: Text(
+                                    canSelect
+                                        ? tr(context, 'returnAvailableQuantity') +
+                                            ': ' +
+                                            line.availableQuantity.toString() +
+                                            ' / ' +
+                                            line.originalQuantity.toString()
+                                        : tr(context, 'returnProductUnavailable'),
+                                  ),
+                                  trailing: !canSelect
+                                      ? const Icon(Icons.warning_amber_rounded)
+                                      : SizedBox(
+                                          width: 132,
+                                          child: Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.end,
+                                            children: [
+                                              IconButton(
+                                                key: ValueKey(
+                                                  'invoice-return-line-' +
+                                                      line.invoiceLineId.toString() +
+                                                      '-minus',
+                                                ),
+                                                tooltip: tr(context, 'decreaseQuantity'),
+                                                onPressed: selected <= 0
+                                                    ? null
+                                                    : () => setState(() {
+                                                          _selectedQuantities[
+                                                              line.invoiceLineId] =
+                                                              selected - 1;
+                                                        }),
+                                                icon: const Icon(
+                                                  Icons.remove_circle_outline,
+                                                ),
+                                              ),
+                                              Text(
+                                                selected.toString(),
+                                                key: ValueKey(
+                                                  'invoice-return-line-' +
+                                                      line.invoiceLineId.toString() +
+                                                      '-quantity',
+                                                ),
+                                              ),
+                                              IconButton(
+                                                key: ValueKey(
+                                                  'invoice-return-line-' +
+                                                      line.invoiceLineId.toString() +
+                                                      '-plus',
+                                                ),
+                                                tooltip: tr(context, 'increaseQuantity'),
+                                                onPressed: selected >=
+                                                        line.availableQuantity
+                                                    ? null
+                                                    : () => setState(() {
+                                                          _selectedQuantities[
+                                                              line.invoiceLineId] =
+                                                              selected + 1;
+                                                        }),
+                                                icon: const Icon(
+                                                  Icons.add_circle_outline,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                );
+                              },
+                            ),
                     ),
-                    items: [
-                      DropdownMenuItem(
-                        value: 'cash',
-                        child: Text(tr(context, 'posPaymentCash')),
+                    const SizedBox(height: 6),
+                    Text(
+                      tr(context, 'partialReturnValue') +
+                          ': ' +
+                          currency.formatMinorUnits(estimatedReturnValue),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      tr(context, 'returnCalculationNotice'),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      key: const Key('invoice-return-reason'),
+                      controller: _reasonController,
+                      maxLength: 500,
+                      minLines: 2,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        labelText: tr(context, 'returnReason'),
                       ),
-                      DropdownMenuItem(
-                        value: 'bank_transfer',
-                        child: Text(tr(context, 'posPaymentBankTransfer')),
+                      validator: (value) =>
+                          value == null || value.trim().isEmpty
+                              ? tr(context, 'returnReasonRequired')
+                              : null,
+                    ),
+                    DropdownButtonFormField<String>(
+                      key: const Key('invoice-return-refund-method'),
+                      initialValue: _refundMethod,
+                      decoration: InputDecoration(
+                        labelText: tr(context, 'returnRefundMethod'),
                       ),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _refundMethod = value);
-                      }
-                    },
-                  ),
-                ],
+                      items: [
+                        DropdownMenuItem(
+                          value: 'cash',
+                          child: Text(tr(context, 'posPaymentCash')),
+                        ),
+                        DropdownMenuItem(
+                          value: 'bank_transfer',
+                          child: Text(tr(context, 'posPaymentBankTransfer')),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => _refundMethod = value);
+                        }
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(tr(context, 'cancel')),
-          ),
-          FilledButton(
-            key: ValueKey('invoice-return-confirm-' + widget.invoice.number),
-            onPressed: () {
-              if (!_formKey.currentState!.validate()) return;
-              Navigator.of(context).pop(
-                InvoiceReturnDraft(
-                  invoiceId: widget.invoice.id,
-                  date: DateTime.now(),
-                  reason: _reasonController.text.trim(),
-                  refundMethod: _refundMethod,
-                ),
-              );
-            },
-            child: Text(tr(context, 'returnInvoice')),
-          ),
-        ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(tr(context, 'cancel')),
+              ),
+              FilledButton(
+                key: ValueKey('invoice-return-confirm-' + widget.invoice.number),
+                onPressed: lines.isEmpty || selectedCount <= 0
+                    ? null
+                    : () {
+                        if (!_formKey.currentState!.validate()) return;
+                        final selections = <InvoiceReturnLineDraft>[
+                          for (final line in lines)
+                            if ((_selectedQuantities[line.invoiceLineId] ?? 0) >
+                                0)
+                              InvoiceReturnLineDraft(
+                                invoiceLineId: line.invoiceLineId,
+                                quantity:
+                                    _selectedQuantities[line.invoiceLineId]!,
+                              ),
+                        ];
+                        Navigator.of(context).pop(
+                          InvoiceReturnDraft(
+                            invoiceId: widget.invoice.id,
+                            date: DateTime.now(),
+                            reason: _reasonController.text.trim(),
+                            refundMethod: _refundMethod,
+                            lines: selections,
+                          ),
+                        );
+                      },
+                child: Text(tr(context, 'returnSelectedItems')),
+              ),
+            ],
+          );
+        },
       );
 }
 
@@ -3039,6 +3219,48 @@ class _InvoicePaymentHistoryDialogState
                           ),
                         ),
                       ],
+                    for (final partialReturn in history.partialReturns) ...[
+                      const Divider(height: 1),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          tr(context, 'partialReturnRecordedValue') +
+                              ': ' +
+                              _money(
+                                partialReturn.returnValueCents,
+                                widget.currencyCode,
+                              ),
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(
+                          _shortDate(context, partialReturn.returnDate) +
+                              ' · ' +
+                              tr(context, 'partialReturnRefund') +
+                              ': ' +
+                              _money(
+                                partialReturn.refundAmountCents,
+                                widget.currencyCode,
+                              ) +
+                              '\n' +
+                              tr(context, 'partialReturnReceivableCredit') +
+                              ': ' +
+                              _money(
+                                partialReturn.receivableCreditCents,
+                                widget.currencyCode,
+                              ) +
+                              '\n' +
+                              partialReturn.reason,
+                        ),
+                        trailing: Icon(
+                          partialReturn.ledgerPostingMatches
+                              ? Icons.check_circle_outline_rounded
+                              : Icons.warning_amber_rounded,
+                          color: partialReturn.ledgerPostingMatches
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
                     if (history.returnRecord != null) ...[
                       const Divider(height: 1),
                       ListTile(

@@ -783,6 +783,192 @@ void main() {
     expect(persian.length, greaterThan(1000));
   });
 
+  test(
+      'partial item returns refund recorded tenders and preserve exact cents',
+      () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await _addTestProduct(repository);
+    final product = (await repository.loadProducts()).single;
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Partial return customer',
+      date: DateTime(2026, 11, 18),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 3)],
+      discountCents: 300,
+      taxCents: 222,
+      paymentAmountCents: 600,
+    ));
+    final invoice = (await repository.loadSnapshot()).invoices.single;
+    final invoiceLine = (await database.handle.query('invoice_lines')).single;
+    expect(
+      (await repository.loadInvoiceReturnableLines(invoice.id))
+          .single
+          .availableQuantity,
+      3,
+    );
+
+    await repository.returnInvoice(InvoiceReturnDraft(
+      invoiceId: invoice.id,
+      date: DateTime(2026, 11, 19),
+      reason: 'One item was damaged',
+      refundMethod: 'cash',
+      lines: [
+        InvoiceReturnLineDraft(
+          invoiceLineId: invoiceLine['id']! as int,
+          quantity: 1,
+        ),
+      ],
+    ));
+
+    final firstReturn =
+        (await database.handle.query('invoice_partial_returns')).single;
+    expect(firstReturn['net_revenue_cents'], 900);
+    expect(firstReturn['tax_cents'], 74);
+    expect(firstReturn['return_value_cents'], 974);
+    expect(firstReturn['refund_amount_cents'], 600);
+    expect(firstReturn['receivable_credit_cents'], 374);
+    expect((await repository.loadProducts()).single.stockQuantity, 3);
+    final firstHistory =
+        (await repository.loadInvoicePaymentHistory(invoice.id))!;
+    expect(firstHistory.partialReturns, hasLength(1));
+    expect(firstHistory.partialReturnedCents, 974);
+    expect(firstHistory.recordedCents, 0);
+    expect(firstHistory.balanceDueCents, 1948);
+    expect(firstHistory.isReconciled, isTrue);
+    final firstPrintData = await repository.loadInvoicePrintData(invoice.id);
+    expect(firstPrintData?.returnedCents, 974);
+    expect(firstPrintData?.paidCents, 0);
+    expect(firstPrintData?.balanceDueCents, 1948);
+    await expectLater(
+      repository.returnInvoice(InvoiceReturnDraft(
+        invoiceId: invoice.id,
+        date: DateTime(2026, 11, 19),
+        reason: 'Prevent mixing a full return with partial returns',
+        refundMethod: 'cash',
+      )),
+      throwsStateError,
+    );
+    expect(
+      (await repository.loadInvoiceReturnableLines(invoice.id))
+          .single
+          .availableQuantity,
+      2,
+    );
+
+    await expectLater(
+      repository.returnInvoice(InvoiceReturnDraft(
+        invoiceId: invoice.id,
+        date: DateTime(2026, 11, 19),
+        reason: 'Duplicate quantity',
+        lines: [
+          InvoiceReturnLineDraft(
+            invoiceLineId: invoiceLine['id']! as int,
+            quantity: 3,
+          ),
+        ],
+      )),
+      throwsArgumentError,
+    );
+
+    await repository.returnInvoice(InvoiceReturnDraft(
+      invoiceId: invoice.id,
+      date: DateTime(2026, 11, 20),
+      reason: 'Remaining items returned',
+      refundMethod: 'bank_transfer',
+      lines: [
+        InvoiceReturnLineDraft(
+          invoiceLineId: invoiceLine['id']! as int,
+          quantity: 2,
+        ),
+      ],
+    ));
+
+    final snapshot = await repository.loadSnapshot();
+    expect(snapshot.invoices.single.isReturned, isTrue);
+    expect(snapshot.invoices.single.returnedCents, 2922);
+    expect(snapshot.invoices.single.paidCents, 0);
+    expect(snapshot.invoices.single.balanceDueCents, 0);
+    expect(snapshot.products.single.stockQuantity, 5);
+    expect(snapshot.balancesByAccount['cash'], 0);
+    expect(snapshot.balancesByAccount['receivables'], 0);
+    expect(snapshot.netIncomeCents, 0);
+    final history = (await repository.loadInvoicePaymentHistory(invoice.id))!;
+    expect(history.partialReturns, hasLength(2));
+    expect(history.partialReturnedCents, 2922);
+    expect(history.totalRefundCents, 600);
+    expect(history.isReconciled, isTrue);
+    final completedPrintData = await repository.loadInvoicePrintData(invoice.id);
+    expect(completedPrintData?.returnedCents, 2922);
+    expect(completedPrintData?.paidCents, 0);
+    expect(completedPrintData?.balanceDueCents, 0);
+    final returnLines = await database.handle.query('journal_lines');
+    expect(
+      returnLines.any((line) =>
+          line['entry_id'] == firstReturn['journal_entry_id'] &&
+          line['account_id'] == 'cash' &&
+          line['credit_cents'] == 600),
+      isTrue,
+    );
+  });
+
+  test('failed partial return posting rolls back inventory and ledger changes',
+      () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await _addTestProduct(repository);
+    final product = (await repository.loadProducts()).single;
+    await repository.createInvoice(InvoiceDraft(
+      customerName: 'Rollback return customer',
+      date: DateTime(2026, 11, 18),
+      lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+      paymentAmountCents: 1000,
+    ));
+    final invoice = (await repository.loadSnapshot()).invoices.single;
+    final invoiceLine = (await database.handle.query('invoice_lines')).single;
+    final beforeStock = (await repository.loadProducts()).single.stockQuantity;
+    final beforeEntries = await database.handle.query('journal_entries');
+    final beforeMovements = await database.handle.query('stock_movements');
+    await database.handle.execute('''
+      CREATE TRIGGER fail_partial_return_line
+      BEFORE INSERT ON invoice_partial_return_lines
+      BEGIN
+        SELECT RAISE(ABORT, 'injected partial return failure');
+      END
+    ''');
+
+    await expectLater(
+      repository.returnInvoice(InvoiceReturnDraft(
+        invoiceId: invoice.id,
+        date: DateTime(2026, 11, 19),
+        reason: 'Injected failure',
+        lines: [
+          InvoiceReturnLineDraft(
+            invoiceLineId: invoiceLine['id']! as int,
+            quantity: 1,
+          ),
+        ],
+      )),
+      throwsA(isA<Exception>()),
+    );
+
+    expect((await repository.loadProducts()).single.stockQuantity, beforeStock);
+    expect(await database.handle.query('invoice_partial_returns'), isEmpty);
+    expect(await database.handle.query('journal_entries'), beforeEntries);
+    expect(await database.handle.query('stock_movements'), beforeMovements);
+  });
+
   test('full invoice return refunds payment, restores stock, and reverses accounting',
       () async {
     final database = await LedgerDatabase.openInMemory();
@@ -827,6 +1013,10 @@ void main() {
     expect(paymentHistory!.isReconciled, isTrue);
     expect(paymentHistory.balanceDueCents, 0);
     expect(paymentHistory.returnRecord!.reason, 'Customer returned item');
+    final printedInvoice = await repository.loadInvoicePrintData(invoice.id);
+    expect(printedInvoice?.returnedCents, invoice.totalCents);
+    expect(printedInvoice?.paidCents, 0);
+    expect(printedInvoice?.balanceDueCents, 0);
 
     final returnRows = await database.handle.query(
       'invoice_returns',

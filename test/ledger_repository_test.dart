@@ -221,6 +221,62 @@ void main() {
     expect(await upgraded.handle.query('stock_movements'), hasLength(2));
   });
 
+  test('v10 to v11 adds partial return tables and preserves payment history',
+      () async {
+    final directory =
+        await Directory.systemTemp.createTemp('ledgerline-v10-partial-return-');
+    addTearDown(() => directory.delete(recursive: true));
+    final path = directory.path + Platform.pathSeparator + 'legacy.sqlite';
+
+    final versionTen = await LedgerDatabase.open(path);
+    await versionTen.handle.insert('sales_invoices', {
+      'id': 'v10-invoice',
+      'invoice_number': 'INV-V10-000001',
+      'customer_name': 'Legacy customer',
+      'issue_date': '2026-11-18',
+      'status': 'paid',
+      'subtotal_cents': 1000,
+      'tax_cents': 0,
+      'discount_cents': 0,
+      'total_cents': 1000,
+      'created_at': '2026-11-18T00:00:00.000Z',
+    });
+    await versionTen.handle.insert('invoice_payments', {
+      'id': 'v10-payment',
+      'invoice_id': 'v10-invoice',
+      'payment_date': '2026-11-18',
+      'amount_cents': 1000,
+      'payment_method': 'cash',
+      'created_at': '2026-11-18T00:00:00.000Z',
+    });
+    await versionTen.handle.execute('DROP TABLE invoice_partial_return_lines');
+    await versionTen.handle.execute('DROP TABLE invoice_partial_returns');
+    await versionTen.handle.execute('PRAGMA user_version = 10');
+    await versionTen.close();
+
+    final upgraded = await LedgerDatabase.open(path);
+    addTearDown(upgraded.close);
+    final version = await upgraded.handle.rawQuery('PRAGMA user_version');
+    expect(version.single['user_version'], 11);
+    final tables = await upgraded.handle.rawQuery('''
+      SELECT name FROM sqlite_master
+      WHERE type = 'table'
+        AND name IN ('invoice_partial_returns', 'invoice_partial_return_lines')
+      ORDER BY name
+    ''');
+    expect(tables.map((row) => row['name']), [
+      'invoice_partial_return_lines',
+      'invoice_partial_returns',
+    ]);
+    final invoice = (await upgraded.handle.query('sales_invoices')).single;
+    expect(invoice['id'], 'v10-invoice');
+    expect(invoice['total_cents'], 1000);
+    final payment = (await upgraded.handle.query('invoice_payments')).single;
+    expect(payment['id'], 'v10-payment');
+    expect(payment['amount_cents'], 1000);
+    expect(await upgraded.handle.query('invoice_partial_returns'), isEmpty);
+  });
+
   test('requires a confirmed base currency before monetary writes', () async {
     final database = await LedgerDatabase.openInMemory();
     addTearDown(database.close);
