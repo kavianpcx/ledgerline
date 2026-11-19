@@ -1010,14 +1010,3 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
     );
   }
 }
-
-  const _PosCheckoutRequest({
-    required this.customerName,
-    required this.paymentAmountCents,
-    required this.paymentMethod,
-  });
-
-  final String customerName;
-  final int paymentAmountCents;
-  final String paymentMethod;
-}
