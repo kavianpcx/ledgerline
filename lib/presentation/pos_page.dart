@@ -644,6 +644,9 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
         return;
       }
 
+      final customerSuggestions =
+          await widget.repository.loadRecentInvoiceCustomers();
+      if (!mounted) return;
       final subtotal = _cartTotal;
       // The modal review step blocks the page below it. Stop animating a
       // checkout spinner behind the dialog while the cashier makes a choice.
@@ -654,6 +657,7 @@ class _PointOfSalePageState extends State<PointOfSalePage> {
           currencyCode: widget.currencyCode,
           subtotalCents: subtotal,
           taxRateBasisPoints: widget.taxRateBasisPoints,
+          customerSuggestions: customerSuggestions,
         ),
       );
       if (request == null || !mounted || _cart.isEmpty) return;
@@ -763,11 +767,13 @@ class _PosCheckoutDialog extends StatefulWidget {
     required this.currencyCode,
     required this.subtotalCents,
     required this.taxRateBasisPoints,
+    required this.customerSuggestions,
   });
 
   final String currencyCode;
   final int subtotalCents;
   final int taxRateBasisPoints;
+  final List<String> customerSuggestions;
 
   @override
   State<_PosCheckoutDialog> createState() => _PosCheckoutDialogState();
@@ -973,15 +979,36 @@ class _PosCheckoutDialogState extends State<_PosCheckoutDialog> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  TextFormField(
-                    key: const Key('pos-customer-name'),
-                    controller: _customerName,
-                    autofocus: true,
-                    decoration:
-                        InputDecoration(labelText: tr(context, 'customer')),
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? tr(context, 'posCustomerRequired')
-                        : null,
+                  Autocomplete<String>(
+                    initialValue: TextEditingValue(text: _customerName.text),
+                    optionsBuilder: (value) {
+                      final query = value.text.trim().toLowerCase();
+                      final names = widget.customerSuggestions;
+                      if (query.isEmpty || query == 'walk-in customer') {
+                        return names.take(8);
+                      }
+                      return names
+                          .where((name) => name.toLowerCase().contains(query))
+                          .take(8);
+                    },
+                    onSelected: (name) => _customerName.text = name,
+                    fieldViewBuilder:
+                        (context, controller, focusNode, onFieldSubmitted) =>
+                            TextFormField(
+                      key: const Key('pos-customer-name'),
+                      controller: controller,
+                      focusNode: focusNode,
+                      autofocus: true,
+                      onChanged: (value) => _customerName.text = value,
+                      onFieldSubmitted: (_) => onFieldSubmitted(),
+                      decoration: InputDecoration(
+                        labelText: tr(context, 'customer'),
+                        helperText: tr(context, 'posRecentCustomerHelp'),
+                      ),
+                      validator: (value) => value == null || value.trim().isEmpty
+                          ? tr(context, 'posCustomerRequired')
+                          : null,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(

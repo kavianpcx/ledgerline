@@ -447,6 +447,49 @@ void main() {
   });
 
 
+  test('loads unique recent invoice customers in recency order', () async {
+    final database = await LedgerDatabase.openInMemory();
+    addTearDown(database.close);
+    final repository = LedgerRepository(database);
+    await repository.initialize();
+    await repository.configureAccountingCurrency(
+      currencyCode: 'USD',
+      confirmExistingAmounts: true,
+    );
+    await repository.createProduct(const ProductDraft(
+      sku: 'CUSTOMER-LOOKUP',
+      name: 'Customer lookup item',
+      unitPriceCents: 5000,
+      unitCostCents: 2000,
+      stockQuantity: 5,
+    ));
+    final product = (await repository.loadProducts()).single;
+
+    Future<void> issueInvoice(String customerName, DateTime date) =>
+        repository.createInvoice(InvoiceDraft(
+          customerName: customerName,
+          date: date,
+          lines: [InvoiceLineDraft(productId: product.id, quantity: 1)],
+        ));
+
+    await issueInvoice('Older customer', DateTime(2026, 1, 1));
+    await issueInvoice('Current customer', DateTime(2026, 1, 5));
+    await issueInvoice('Current customer', DateTime(2026, 1, 6));
+
+    expect(
+      await repository.loadRecentInvoiceCustomers(),
+      ['Current customer', 'Older customer'],
+    );
+    expect(
+      await repository.loadRecentInvoiceCustomers(limit: 1),
+      ['Current customer'],
+    );
+    await expectLater(
+      repository.loadRecentInvoiceCustomers(limit: 0),
+      throwsArgumentError,
+    );
+  });
+
   test('posts split cash and bank tenders to their matching accounts', () async {
     final database = await LedgerDatabase.openInMemory();
     addTearDown(database.close);
