@@ -1032,6 +1032,112 @@ class LedgerRepository {
   }
 
 
+  Future<List<InvoiceReturnableLine>> loadInvoiceReturnableLines(
+    String invoiceId,
+  ) async {
+    final normalizedId = invoiceId.trim();
+    if (normalizedId.isEmpty) {
+      throw ArgumentError.value(invoiceId, 'invoiceId');
+    }
+    return _database.handle.transaction((txn) async {
+      final invoiceRows = await txn.query(
+        'sales_invoices',
+        columns: [
+          'id',
+          'status',
+          'subtotal_cents',
+          'discount_cents',
+          'tax_cents',
+          'total_cents',
+          'returned_at',
+        ],
+        where: 'id = ?',
+        whereArgs: [normalizedId],
+        limit: 1,
+      );
+      if (invoiceRows.isEmpty) {
+        throw ArgumentError('The invoice no longer exists.');
+      }
+      final invoice = invoiceRows.single;
+      if (invoice['status'] == 'void' || invoice['returned_at'] != null) {
+        return const <InvoiceReturnableLine>[];
+      }
+      final lineRows = await txn.query(
+        'invoice_lines',
+        columns: [
+          'id',
+          'product_id',
+          'description',
+          'quantity',
+          'unit_price_cents',
+          'line_total_cents',
+        ],
+        where: 'invoice_id = ?',
+        whereArgs: [normalizedId],
+        orderBy: 'id ASC',
+      );
+      final allocations = _allocateInvoiceReturnValues(invoice, lineRows);
+      final allocationsById = {
+        for (final item in allocations) item.invoiceLineId: item,
+      };
+      final returnedRows = await txn.rawQuery('''
+        SELECT lines.invoice_line_id,
+               COALESCE(SUM(lines.quantity), 0) AS returned_quantity
+        FROM invoice_partial_return_lines AS lines
+        INNER JOIN invoice_partial_returns AS returns
+          ON returns.id = lines.return_id
+        WHERE returns.invoice_id = ?
+        GROUP BY lines.invoice_line_id
+      ''', [normalizedId]);
+      final returnedByLineId = <int, int>{};
+      for (final row in returnedRows) {
+        returnedByLineId[row['invoice_line_id']! as int] =
+            row['returned_quantity']! as int;
+      }
+
+      final result = <InvoiceReturnableLine>[];
+      for (final row in lineRows) {
+        final lineId = row['id']! as int;
+        final quantity = row['quantity']! as int;
+        final returnedQuantity = returnedByLineId[lineId] ?? 0;
+        if (quantity <= 0 || returnedQuantity < 0 || returnedQuantity > quantity) {
+          throw StateError('Invoice return quantities are inconsistent.');
+        }
+        final allocation = allocationsById[lineId]!;
+        final lineValueCents =
+            allocation.netRevenueCents + allocation.taxCents;
+        final returnedValueCents = _roundedShare(
+          lineValueCents,
+          returnedQuantity,
+          quantity,
+        );
+        final productId = row['product_id'] as String?;
+        var productAvailable = false;
+        if (productId != null) {
+          final productRows = await txn.query(
+            'products',
+            columns: ['id'],
+            where: 'id = ?',
+            whereArgs: [productId],
+            limit: 1,
+          );
+          productAvailable = productRows.isNotEmpty;
+        }
+        result.add(InvoiceReturnableLine(
+          invoiceLineId: lineId,
+          description: row['description']! as String,
+          originalQuantity: quantity,
+          returnedQuantity: returnedQuantity,
+          availableQuantity: quantity - returnedQuantity,
+          unitPriceCents: row['unit_price_cents']! as int,
+          remainingLineValueCents: lineValueCents - returnedValueCents,
+          productAvailable: productAvailable,
+        ));
+      }
+      return result;
+    });
+  }
+
   Future<void> returnInvoice(InvoiceReturnDraft draft) async {
     final invoiceId = draft.invoiceId.trim();
     final reason = draft.reason.trim();
@@ -1044,6 +1150,10 @@ class LedgerRepository {
         'refundMethod',
         'Use cash or bank_transfer.',
       );
+    }
+    if (draft.lines.isNotEmpty) {
+      await _returnInvoiceLines(draft, invoiceId, reason);
+      return;
     }
 
     await _database.handle.transaction((txn) async {
@@ -1063,6 +1173,18 @@ class LedgerRepository {
       }
       if (invoice['returned_at'] != null) {
         throw StateError('This invoice has already been returned.');
+      }
+      final partialReturnRows = await txn.query(
+        'invoice_partial_returns',
+        columns: ['id'],
+        where: 'invoice_id = ?',
+        whereArgs: [invoiceId],
+        limit: 1,
+      );
+      if (partialReturnRows.isNotEmpty) {
+        throw StateError(
+          'Select the remaining invoice items in the item-return flow.',
+        );
       }
 
       const maxSignedInt = 0x7fffffffffffffff;
@@ -1265,6 +1387,581 @@ class LedgerRepository {
   }
 
 
+  int _roundedShare(int total, int numerator, int denominator) {
+    if (total < 0 ||
+        numerator < 0 ||
+        denominator <= 0 ||
+        numerator > denominator) {
+      throw StateError('Invoice return allocation is invalid.');
+    }
+    final divisor = BigInt.from(denominator);
+    final value = BigInt.from(total) * BigInt.from(numerator);
+    return ((value + BigInt.from(denominator ~/ 2)) ~/ divisor).toInt();
+  }
+
+  int _checkedSum(int current, int amount, String error) {
+    const maxSignedInt = 0x7fffffffffffffff;
+    if (amount < 0 || current > maxSignedInt - amount) {
+      throw StateError(error);
+    }
+    return current + amount;
+  }
+
+  List<({int invoiceLineId, int netRevenueCents, int taxCents})>
+      _allocateInvoiceReturnValues(
+    Map<String, Object?> invoice,
+    List<Map<String, Object?>> invoiceLines,
+  ) {
+    const maxSignedInt = 0x7fffffffffffffff;
+    final subtotal = invoice['subtotal_cents']! as int;
+    final discount = invoice['discount_cents'] as int? ?? 0;
+    final tax = invoice['tax_cents']! as int;
+    final total = invoice['total_cents']! as int;
+    if (invoiceLines.isEmpty ||
+        subtotal < 0 ||
+        discount < 0 ||
+        discount > subtotal ||
+        tax < 0) {
+      throw StateError('Invoice totals are inconsistent.');
+    }
+    final netRevenue = subtotal - discount;
+    if (tax > maxSignedInt - netRevenue || total != netRevenue + tax) {
+      throw StateError('Invoice totals are inconsistent.');
+    }
+
+    final working = <({int id, int quantity, int lineTotal, int netRevenue})>[];
+    var lineSubtotalTotal = 0;
+    var runningSubtotal = 0;
+    var allocatedDiscount = 0;
+    var quantityTotal = 0;
+    for (final line in invoiceLines) {
+      final id = line['id']! as int;
+      final quantity = line['quantity']! as int;
+      final lineTotal = line['line_total_cents']! as int;
+      if (quantity <= 0 || lineTotal < 0) {
+        throw StateError('Invoice line values are inconsistent.');
+      }
+      lineSubtotalTotal = _checkedSum(
+        lineSubtotalTotal,
+        lineTotal,
+        'Invoice subtotal exceeds the supported range.',
+      );
+      quantityTotal = _checkedSum(
+        quantityTotal,
+        quantity,
+        'Invoice quantities exceed the supported range.',
+      );
+      runningSubtotal = _checkedSum(
+        runningSubtotal,
+        lineTotal,
+        'Invoice subtotal exceeds the supported range.',
+      );
+      final discountThrough = subtotal == 0
+          ? 0
+          : _roundedShare(discount, runningSubtotal, subtotal);
+      final lineDiscount = discountThrough - allocatedDiscount;
+      if (lineDiscount < 0 || lineDiscount > lineTotal) {
+        throw StateError('Invoice discount allocation is inconsistent.');
+      }
+      allocatedDiscount = discountThrough;
+      working.add((
+        id: id,
+        quantity: quantity,
+        lineTotal: lineTotal,
+        netRevenue: lineTotal - lineDiscount,
+      ));
+    }
+    if (lineSubtotalTotal != subtotal || allocatedDiscount != discount) {
+      throw StateError('Invoice lines do not match the invoice subtotal.');
+    }
+
+    final allocationWeightTotal = netRevenue > 0
+        ? netRevenue
+        : subtotal > 0
+            ? subtotal
+            : quantityTotal;
+    var runningWeight = 0;
+    var allocatedTax = 0;
+    final result = <({int invoiceLineId, int netRevenueCents, int taxCents})>[];
+    for (final line in working) {
+      final weight = netRevenue > 0
+          ? line.netRevenue
+          : subtotal > 0
+              ? line.lineTotal
+              : line.quantity;
+      runningWeight = _checkedSum(
+        runningWeight,
+        weight,
+        'Invoice tax allocation exceeds the supported range.',
+      );
+      final taxThrough = _roundedShare(tax, runningWeight, allocationWeightTotal);
+      final lineTax = taxThrough - allocatedTax;
+      if (lineTax < 0) {
+        throw StateError('Invoice tax allocation is inconsistent.');
+      }
+      allocatedTax = taxThrough;
+      result.add((
+        invoiceLineId: line.id,
+        netRevenueCents: line.netRevenue,
+        taxCents: lineTax,
+      ));
+    }
+    if (allocatedTax != tax) {
+      throw StateError('Invoice tax allocation is inconsistent.');
+    }
+    return result;
+  }
+
+  Future<void> _returnInvoiceLines(
+    InvoiceReturnDraft draft,
+    String invoiceId,
+    String reason,
+  ) async {
+    final selections = <int, int>{};
+    for (final line in draft.lines) {
+      if (line.invoiceLineId <= 0 || line.quantity <= 0 ||
+          selections.containsKey(line.invoiceLineId)) {
+        throw ArgumentError('Select a positive quantity for each invoice item.');
+      }
+      selections[line.invoiceLineId] = line.quantity;
+    }
+    if (selections.isEmpty) {
+      throw ArgumentError('Select at least one invoice item to return.');
+    }
+
+    await _database.handle.transaction((txn) async {
+      await _requireAccountingCurrency(txn);
+      final invoiceRows = await txn.query(
+        'sales_invoices',
+        where: 'id = ?',
+        whereArgs: [invoiceId],
+        limit: 1,
+      );
+      if (invoiceRows.isEmpty) {
+        throw ArgumentError('The invoice no longer exists.');
+      }
+      final invoice = invoiceRows.single;
+      if (invoice['status'] == 'void') {
+        throw ArgumentError('A void invoice cannot be returned.');
+      }
+      if (invoice['returned_at'] != null) {
+        throw StateError('This invoice has already been returned.');
+      }
+      final legacyReturns = await txn.query(
+        'invoice_returns',
+        columns: ['id'],
+        where: 'invoice_id = ?',
+        whereArgs: [invoiceId],
+        limit: 1,
+      );
+      if (legacyReturns.isNotEmpty) {
+        throw StateError('This invoice has already been returned.');
+      }
+
+      const maxSignedInt = 0x7fffffffffffffff;
+      final invoiceLines = await txn.query(
+        'invoice_lines',
+        columns: [
+          'id',
+          'product_id',
+          'description',
+          'quantity',
+          'line_total_cents',
+          'unit_cost_cents',
+        ],
+        where: 'invoice_id = ?',
+        whereArgs: [invoiceId],
+        orderBy: 'id ASC',
+      );
+      final allocations = _allocateInvoiceReturnValues(invoice, invoiceLines);
+      final allocationsById = {
+        for (final item in allocations) item.invoiceLineId: item,
+      };
+      final priorLineRows = await txn.rawQuery('''
+        SELECT lines.invoice_line_id,
+               COALESCE(SUM(lines.quantity), 0) AS quantity,
+               COALESCE(SUM(lines.net_revenue_cents), 0) AS net_revenue_cents,
+               COALESCE(SUM(lines.tax_cents), 0) AS tax_cents,
+               COALESCE(SUM(lines.line_value_cents), 0) AS line_value_cents
+        FROM invoice_partial_return_lines AS lines
+        INNER JOIN invoice_partial_returns AS returns
+          ON returns.id = lines.return_id
+        WHERE returns.invoice_id = ?
+        GROUP BY lines.invoice_line_id
+      ''', [invoiceId]);
+      final priorByLineId = <int, ({int quantity, int netRevenue, int tax, int value})>{};
+      var priorLineValueTotal = 0;
+      for (final row in priorLineRows) {
+        final lineId = row['invoice_line_id']! as int;
+        final entry = (
+          quantity: row['quantity']! as int,
+          netRevenue: row['net_revenue_cents']! as int,
+          tax: row['tax_cents']! as int,
+          value: row['line_value_cents']! as int,
+        );
+        if (entry.quantity <= 0 ||
+            entry.netRevenue < 0 ||
+            entry.tax < 0 ||
+            entry.value != entry.netRevenue + entry.tax) {
+          throw StateError('Existing invoice return lines are inconsistent.');
+        }
+        priorByLineId[lineId] = entry;
+        priorLineValueTotal = _checkedSum(
+          priorLineValueTotal,
+          entry.value,
+          'Invoice return value exceeds the supported range.',
+        );
+      }
+      final priorReturnRows = await txn.query(
+        'invoice_partial_returns',
+        columns: ['return_value_cents', 'refund_amount_cents'],
+        where: 'invoice_id = ?',
+        whereArgs: [invoiceId],
+      );
+      var priorReturnValue = 0;
+      var priorRefund = 0;
+      for (final row in priorReturnRows) {
+        priorReturnValue = _checkedSum(
+          priorReturnValue,
+          row['return_value_cents']! as int,
+          'Invoice return value exceeds the supported range.',
+        );
+        priorRefund = _checkedSum(
+          priorRefund,
+          row['refund_amount_cents']! as int,
+          'Invoice refunds exceed the supported range.',
+        );
+      }
+      if (priorReturnValue != priorLineValueTotal) {
+        throw StateError('Existing invoice return totals do not reconcile.');
+      }
+
+      final selected = selections.entries.toList()
+        ..sort((a, b) => a.key.compareTo(b.key));
+      final returnLines =
+          <({Map<String, Object?> invoiceLine, Product product, int quantity,
+              int netRevenue, int tax, int value, int costTotal})>[];
+      var netRevenueCents = 0;
+      var taxCents = 0;
+      var returnValueCents = 0;
+      var costTotalCents = 0;
+      var allItemsReturned = true;
+      for (final row in invoiceLines) {
+        final lineId = row['id']! as int;
+        final quantity = row['quantity']! as int;
+        final previous = priorByLineId[lineId]?.quantity ?? 0;
+        if (previous > quantity) {
+          throw StateError('Existing invoice return quantity exceeds the sale.');
+        }
+        allItemsReturned = allItemsReturned && previous == quantity;
+      }
+
+      for (final selection in selected) {
+        final lineRows = invoiceLines
+            .where((row) => row['id'] == selection.key)
+            .toList(growable: false);
+        if (lineRows.isEmpty) {
+          throw ArgumentError('The selected item is not part of this invoice.');
+        }
+        final line = lineRows.single;
+        final originalQuantity = line['quantity']! as int;
+        final previous = priorByLineId[selection.key];
+        final previousQuantity = previous?.quantity ?? 0;
+        final quantity = selection.value;
+        if (previousQuantity > originalQuantity ||
+            quantity > originalQuantity - previousQuantity) {
+          throw ArgumentError('Return quantity exceeds the remaining invoice quantity.');
+        }
+        final productId = line['product_id'] as String?;
+        if (productId == null) {
+          throw StateError('An invoice product was deleted and cannot be restocked.');
+        }
+        final productRows = await txn.query(
+          'products',
+          columns: _productColumns,
+          where: 'id = ?',
+          whereArgs: [productId],
+          limit: 1,
+        );
+        if (productRows.isEmpty) {
+          throw StateError('An invoice product was deleted and cannot be restocked.');
+        }
+        final product = Product.fromRow(productRows.single);
+        if (quantity > maxSignedInt - product.stockQuantity) {
+          throw StateError('Returned stock exceeds the supported quantity range.');
+        }
+        final unitCost = line['unit_cost_cents']! as int;
+        if (unitCost < 0 || unitCost > maxSignedInt ~/ quantity) {
+          throw StateError('Invoice inventory values are invalid.');
+        }
+        final costTotal = unitCost * quantity;
+        final allocation = allocationsById[selection.key]!;
+        final fullLineValue = allocation.netRevenueCents + allocation.taxCents;
+        final previousRevenue = previous?.netRevenue ?? 0;
+        final previousTax = previous?.tax ?? 0;
+        final priorRevenueThrough = _roundedShare(
+          allocation.netRevenueCents,
+          previousQuantity,
+          originalQuantity,
+        );
+        final returnRevenueThrough = _roundedShare(
+          allocation.netRevenueCents,
+          previousQuantity + quantity,
+          originalQuantity,
+        );
+        final priorTaxThrough = _roundedShare(
+          allocation.taxCents,
+          previousQuantity,
+          originalQuantity,
+        );
+        final returnTaxThrough = _roundedShare(
+          allocation.taxCents,
+          previousQuantity + quantity,
+          originalQuantity,
+        );
+        final netRevenue = returnRevenueThrough - priorRevenueThrough;
+        final lineTax = returnTaxThrough - priorTaxThrough;
+        final priorLineValue = previousRevenue + previousTax;
+        final previousExpectedValue = _roundedShare(
+          fullLineValue,
+          previousQuantity,
+          originalQuantity,
+        );
+        if (previousQuantity > 0 && priorLineValue != previousExpectedValue) {
+          throw StateError('Existing invoice return line allocations are inconsistent.');
+        }
+        final lineValue = netRevenue + lineTax;
+        if (lineValue < 0 || lineValue !=
+            _roundedShare(
+              fullLineValue,
+              previousQuantity + quantity,
+              originalQuantity,
+            ) - previousExpectedValue) {
+          throw StateError('Invoice return line allocation is inconsistent.');
+        }
+        final line = lineRows.single;
+        returnLines.add((
+          invoiceLine: line,
+          product: product,
+          quantity: quantity,
+          netRevenue: netRevenue,
+          tax: lineTax,
+          value: lineValue,
+          costTotal: costTotal,
+        ));
+        netRevenueCents = _checkedSum(
+          netRevenueCents,
+          netRevenue,
+          'Invoice return value exceeds the supported range.',
+        );
+        taxCents = _checkedSum(
+          taxCents,
+          lineTax,
+          'Invoice return value exceeds the supported range.',
+        );
+        returnValueCents = _checkedSum(
+          returnValueCents,
+          lineValue,
+          'Invoice return value exceeds the supported range.',
+        );
+        costTotalCents = _checkedSum(
+          costTotalCents,
+          costTotal,
+          'Returned inventory value exceeds the supported range.',
+        );
+      }
+
+      for (final row in invoiceLines) {
+        final lineId = row['id']! as int;
+        final originalQuantity = row['quantity']! as int;
+        final previous = priorByLineId[lineId]?.quantity ?? 0;
+        final selectedQuantity = selections[lineId] ?? 0;
+        if (previous + selectedQuantity > originalQuantity) {
+          throw ArgumentError('Return quantity exceeds the remaining invoice quantity.');
+        }
+        allItemsReturned = allItemsReturned &&
+            previous + selectedQuantity == originalQuantity;
+      }
+      if (returnValueCents > 0 &&
+          returnValueCents > (invoice['total_cents']! as int) - priorReturnValue) {
+        throw StateError('Invoice return value exceeds the remaining invoice total.');
+      }
+      final paymentRows = await txn.query(
+        'invoice_payments',
+        columns: ['amount_cents'],
+        where: 'invoice_id = ?',
+        whereArgs: [invoiceId],
+      );
+      var paymentsTotal = 0;
+      for (final row in paymentRows) {
+        final amount = row['amount_cents']! as int;
+        if (amount <= 0) {
+          throw StateError('Invoice payment history is invalid.');
+        }
+        paymentsTotal = _checkedSum(
+          paymentsTotal,
+          amount,
+          'Invoice payment history exceeds the supported range.',
+        );
+      }
+      if (priorRefund > paymentsTotal) {
+        throw StateError('Existing invoice refunds exceed recorded payments.');
+      }
+      final paidAvailable = paymentsTotal - priorRefund;
+      final priorAndCurrentValue =
+          _checkedSum(priorReturnValue, returnValueCents, 'Invoice returns exceed the supported range.');
+      final invoiceTotal = invoice['total_cents']! as int;
+      if (priorAndCurrentValue > invoiceTotal ||
+          paidAvailable > invoiceTotal - priorReturnValue) {
+        throw StateError('Invoice payment and return totals are inconsistent.');
+      }
+      final refundCents =
+          returnValueCents < paidAvailable ? returnValueCents : paidAvailable;
+      final receivableCreditCents = returnValueCents - refundCents;
+      final remainingValueCents = invoiceTotal - priorAndCurrentValue;
+      final remainingPaidCents = paidAvailable - refundCents;
+      if (remainingPaidCents > remainingValueCents) {
+        throw StateError('Invoice payments exceed the remaining invoice value.');
+      }
+
+      final returnId =
+          'partial_return_' + invoiceId + '_' + DateTime.now().microsecondsSinceEpoch.toString();
+      final journalId = 'journal_' + returnId;
+      final createdAt = DateTime.now().toUtc().toIso8601String();
+      final hasJournalEntry = netRevenueCents > 0 ||
+          taxCents > 0 ||
+          refundCents > 0 ||
+          receivableCreditCents > 0 ||
+          costTotalCents > 0;
+      if (hasJournalEntry) {
+        await txn.insert('journal_entries', {
+          'id': journalId,
+          'entry_date': _dateOnly(draft.date),
+          'description':
+              'Partial sales return · ' +
+                  (invoice['invoice_number']! as String) +
+                  ' · ' +
+                  reason,
+          'created_at': createdAt,
+        });
+
+        Future<void> insertLine({
+          required String accountId,
+          required int debitCents,
+          required int creditCents,
+        }) async {
+          if (debitCents == 0 && creditCents == 0) return;
+          await txn.insert('journal_lines', {
+            'entry_id': journalId,
+            'account_id': accountId,
+            'debit_cents': debitCents,
+            'credit_cents': creditCents,
+          });
+        }
+
+        await insertLine(
+          accountId: 'sales-income',
+          debitCents: netRevenueCents,
+          creditCents: 0,
+        );
+        await insertLine(
+          accountId: 'tax-payable',
+          debitCents: taxCents,
+          creditCents: 0,
+        );
+        await insertLine(
+          accountId: draft.refundMethod == 'bank_transfer' ? 'bank' : 'cash',
+          debitCents: 0,
+          creditCents: refundCents,
+        );
+        await insertLine(
+          accountId: 'receivables',
+          debitCents: 0,
+          creditCents: receivableCreditCents,
+        );
+        await insertLine(
+          accountId: 'inventory',
+          debitCents: costTotalCents,
+          creditCents: 0,
+        );
+        await insertLine(
+          accountId: 'cost-of-goods',
+          debitCents: 0,
+          creditCents: costTotalCents,
+        );
+      }
+
+      await txn.insert('invoice_partial_returns', {
+        'id': returnId,
+        'invoice_id': invoiceId,
+        'return_date': _dateOnly(draft.date),
+        'reason': reason,
+        'net_revenue_cents': netRevenueCents,
+        'tax_cents': taxCents,
+        'return_value_cents': returnValueCents,
+        'refund_amount_cents': refundCents,
+        'receivable_credit_cents': receivableCreditCents,
+        'refund_method': draft.refundMethod,
+        'journal_entry_id': hasJournalEntry ? journalId : null,
+        'created_at': createdAt,
+      });
+
+      for (final line in returnLines) {
+        final product = line.product;
+        final invoiceLine = line.invoiceLine;
+        final updated = await txn.rawUpdate(
+          'UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?',
+          [line.quantity, product.id],
+        );
+        if (updated != 1) {
+          throw StateError('Product stock changed while returning invoice items.');
+        }
+        final unitCost = invoiceLine['unit_cost_cents']! as int;
+        await txn.insert('invoice_partial_return_lines', {
+          'return_id': returnId,
+          'invoice_line_id': invoiceLine['id'],
+          'product_id': product.id,
+          'product_sku': product.sku,
+          'product_name': product.name,
+          'quantity': line.quantity,
+          'net_revenue_cents': line.netRevenue,
+          'tax_cents': line.tax,
+          'line_value_cents': line.value,
+          'unit_cost_cents': unitCost,
+          'cost_total_cents': line.costTotal,
+        });
+        await _insertStockMovement(
+          txn,
+          productId: product.id,
+          productSku: product.sku,
+          productName: product.name,
+          movementType: 'customer_return',
+          quantityDelta: line.quantity,
+          unitCostCents: unitCost,
+          referenceId: returnId,
+          description: 'Partial return of invoice ' +
+              (invoice['invoice_number']! as String) +
+              ' · ' +
+              (invoiceLine['description']! as String),
+          occurredAt: draft.date,
+        );
+      }
+
+      final newStatus = remainingPaidCents == remainingValueCents ? 'paid' : 'issued';
+      final values = <String, Object?>{'status': newStatus};
+      if (allItemsReturned) values['returned_at'] = _dateOnly(draft.date);
+      final updated = await txn.update(
+        'sales_invoices',
+        values,
+        where: 'id = ? AND returned_at IS NULL AND status != ?',
+        whereArgs: [invoiceId, 'void'],
+      );
+      if (updated != 1) {
+        throw StateError('The invoice changed while returning its items.');
+      }
+    });
+  }
+
   /// Returns distinct customer names from recent invoices for POS quick selection.
   Future<List<String>> loadRecentInvoiceCustomers({int limit = 50}) async {
     if (limit < 1 || limit > 100) {
@@ -1396,6 +2093,28 @@ class LedgerRepository {
           ledgerPostingMatches: await _paymentJournalPostingMatches(txn, row),
         ));
       }
+      final partialReturnRows = await txn.query(
+        'invoice_partial_returns',
+        where: 'invoice_id = ?',
+        whereArgs: [invoiceId],
+        orderBy: 'return_date ASC, created_at ASC, id ASC',
+      );
+      final partialReturns = <InvoicePartialReturnRecord>[];
+      for (final row in partialReturnRows) {
+        partialReturns.add(InvoicePartialReturnRecord(
+          returnDate: DateTime.parse(row['return_date']! as String),
+          reason: row['reason']! as String,
+          netRevenueCents: row['net_revenue_cents']! as int,
+          taxCents: row['tax_cents']! as int,
+          returnValueCents: row['return_value_cents']! as int,
+          refundAmountCents: row['refund_amount_cents']! as int,
+          receivableCreditCents: row['receivable_credit_cents']! as int,
+          refundMethod: row['refund_method']! as String,
+          journalEntryId: row['journal_entry_id'] as String?,
+          ledgerPostingMatches:
+              await _partialReturnJournalPostingMatches(txn, invoice, row),
+        ));
+      }
       final returnRows = await txn.query(
         'invoice_returns',
         where: 'invoice_id = ?',
@@ -1426,6 +2145,7 @@ class LedgerRepository {
         payments: payments,
         returnRecordExpected: invoice['returned_at'] != null,
         returnRecord: returnRecord,
+        partialReturns: partialReturns,
       );
     });
   }
@@ -1549,6 +2269,205 @@ class LedgerRepository {
     var debitTotal = 0;
     var creditTotal = 0;
     for (final line in lines) {
+      final accountId = line['account_id']! as String;
+      final debit = line['debit_cents']! as int;
+      final credit = line['credit_cents']! as int;
+      if (debit < 0 ||
+          credit < 0 ||
+          (debit == 0 && credit == 0) ||
+          (debit > 0 && credit > 0) ||
+          debitTotal > maxSignedInt - debit ||
+          creditTotal > maxSignedInt - credit ||
+          actualLines.containsKey(accountId)) {
+        return false;
+      }
+      actualLines[accountId] = [debit, credit];
+      debitTotal += debit;
+      creditTotal += credit;
+    }
+    if (debitTotal != creditTotal) return false;
+    for (final entry in expectedLines.entries) {
+      final actual = actualLines[entry.key];
+      if (actual == null ||
+          actual[0] != entry.value[0] ||
+          actual[1] != entry.value[1]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Future<bool> _partialReturnJournalPostingMatches(
+    DatabaseExecutor executor,
+    Map<String, Object?> invoice,
+    Map<String, Object?> returnRow,
+  ) async {
+    const maxSignedInt = 0x7fffffffffffffff;
+    final invoiceId = invoice['id']! as String;
+    final returnId = returnRow['id']! as String;
+    final journalEntryId = returnRow['journal_entry_id'] as String?;
+    final returnDate = returnRow['return_date'] as String?;
+    final refundMethod = returnRow['refund_method'] as String?;
+    final returnValue = returnRow['return_value_cents'] as int?;
+    final netRevenue = returnRow['net_revenue_cents'] as int?;
+    final tax = returnRow['tax_cents'] as int?;
+    final refund = returnRow['refund_amount_cents'] as int?;
+    final receivableCredit = returnRow['receivable_credit_cents'] as int?;
+    if (!returnId.startsWith('partial_return_' + invoiceId + '_') ||
+        returnRow['invoice_id'] != invoiceId ||
+        returnDate == null ||
+        refundMethod == null ||
+        !_allowedPaymentMethods.contains(refundMethod) ||
+        returnValue == null ||
+        netRevenue == null ||
+        tax == null ||
+        refund == null ||
+        receivableCredit == null ||
+        netRevenue < 0 ||
+        tax < 0 ||
+        returnValue != netRevenue + tax ||
+        refund < 0 ||
+        receivableCredit < 0 ||
+        returnValue != refund + receivableCredit) {
+      return false;
+    }
+
+    final returnLines = await executor.query(
+      'invoice_partial_return_lines',
+      where: 'return_id = ?',
+      whereArgs: [returnId],
+      orderBy: 'invoice_line_id ASC',
+    );
+    if (returnLines.isEmpty) return false;
+    var linesNetRevenue = 0;
+    var linesTax = 0;
+    var linesValue = 0;
+    var costTotal = 0;
+    final movementsExpected = <({String productId, int quantity, int unitCost})>[];
+    for (final line in returnLines) {
+      final invoiceLineId = line['invoice_line_id']! as int;
+      final productId = line['product_id']! as String;
+      final quantity = line['quantity']! as int;
+      final lineNet = line['net_revenue_cents']! as int;
+      final lineTax = line['tax_cents']! as int;
+      final lineValue = line['line_value_cents']! as int;
+      final unitCost = line['unit_cost_cents']! as int;
+      final lineCost = line['cost_total_cents']! as int;
+      if (productId.isEmpty ||
+          quantity <= 0 ||
+          lineNet < 0 ||
+          lineTax < 0 ||
+          lineValue != lineNet + lineTax ||
+          unitCost < 0 ||
+          unitCost > maxSignedInt ~/ quantity ||
+          lineCost != unitCost * quantity) {
+        return false;
+      }
+      final invoiceLineRows = await executor.query(
+        'invoice_lines',
+        columns: ['invoice_id', 'product_id', 'unit_cost_cents'],
+        where: 'id = ?',
+        whereArgs: [invoiceLineId],
+        limit: 1,
+      );
+      if (invoiceLineRows.isEmpty ||
+          invoiceLineRows.single['invoice_id'] != invoiceId ||
+          invoiceLineRows.single['unit_cost_cents'] != unitCost) {
+        return false;
+      }
+      final originalProductId =
+          invoiceLineRows.single['product_id'] as String?;
+      if (originalProductId != null && originalProductId != productId) {
+        return false;
+      }
+
+      linesNetRevenue = _checkedSum(
+        linesNetRevenue,
+        lineNet,
+        'Invoice return amount exceeds the supported range.',
+      );
+      linesTax = _checkedSum(
+        linesTax,
+        lineTax,
+        'Invoice return amount exceeds the supported range.',
+      );
+      linesValue = _checkedSum(
+        linesValue,
+        lineValue,
+        'Invoice return amount exceeds the supported range.',
+      );
+      costTotal = _checkedSum(
+        costTotal,
+        lineCost,
+        'Invoice return cost exceeds the supported range.',
+      );
+      movementsExpected.add((
+        productId: productId,
+        quantity: quantity,
+        unitCost: unitCost,
+      ));
+    }
+    if (linesNetRevenue != netRevenue ||
+        linesTax != tax ||
+        linesValue != returnValue) {
+      return false;
+    }
+
+    final movements = await executor.query(
+      'stock_movements',
+      where: 'reference_id = ?',
+      whereArgs: [returnId],
+      orderBy: 'id ASC',
+    );
+    if (movements.length != movementsExpected.length) return false;
+    for (var index = 0; index < movementsExpected.length; index++) {
+      final expected = movementsExpected[index];
+      final movement = movements[index];
+      if (movement['movement_type'] != 'customer_return' ||
+          movement['product_id'] != expected.productId ||
+          movement['quantity_delta'] != expected.quantity ||
+          movement['unit_cost_cents'] != expected.unitCost) {
+        return false;
+      }
+    }
+
+    final refundAccount = refundMethod == 'bank_transfer' ? 'bank' : 'cash';
+    final expectedLines = <String, List<int>>{};
+    void expectLine(String accountId, int debit, int credit) {
+      if (debit > 0 || credit > 0) expectedLines[accountId] = [debit, credit];
+    }
+
+    expectLine('sales-income', netRevenue, 0);
+    expectLine('tax-payable', tax, 0);
+    expectLine(refundAccount, 0, refund);
+    expectLine('receivables', 0, receivableCredit);
+    expectLine('inventory', costTotal, 0);
+    expectLine('cost-of-goods', 0, costTotal);
+
+    if (journalEntryId == null) return expectedLines.isEmpty;
+    if (journalEntryId != 'journal_' + returnId) return false;
+    final entryRows = await executor.query(
+      'journal_entries',
+      columns: ['entry_date'],
+      where: 'id = ?',
+      whereArgs: [journalEntryId],
+      limit: 1,
+    );
+    if (entryRows.isEmpty || entryRows.single['entry_date'] != returnDate) {
+      return false;
+    }
+    final journalLines = await executor.query(
+      'journal_lines',
+      where: 'entry_id = ?',
+      whereArgs: [journalEntryId],
+    );
+    if (journalLines.length != expectedLines.length || journalLines.length < 2) {
+      return false;
+    }
+    final actualLines = <String, List<int>>{};
+    var debitTotal = 0;
+    var creditTotal = 0;
+    for (final line in journalLines) {
       final accountId = line['account_id']! as String;
       final debit = line['debit_cents']! as int;
       final credit = line['credit_cents']! as int;
