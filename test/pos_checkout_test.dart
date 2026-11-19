@@ -1013,6 +1013,10 @@ void main() {
     expect(paymentHistory!.isReconciled, isTrue);
     expect(paymentHistory.balanceDueCents, 0);
     expect(paymentHistory.returnRecord!.reason, 'Customer returned item');
+    final printedInvoice = await repository.loadInvoicePrintData(invoice.id);
+    expect(printedInvoice?.returnedCents, invoice.totalCents);
+    expect(printedInvoice?.paidCents, 0);
+    expect(printedInvoice?.balanceDueCents, 0);
 
     final returnRows = await database.handle.query(
       'invoice_returns',
