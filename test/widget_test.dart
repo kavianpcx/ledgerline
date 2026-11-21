@@ -58,8 +58,11 @@ void main() {
       if (finishButton.onPressed != null) break;
     }
     await tester.enterText(find.byType(TextField).first, 'Corner Shop');
-    await tester.ensureVisible(find.byKey(const Key('setup-finish')));
-    await tester.tap(find.byKey(const Key('setup-finish')));
+    final finishFinder = find.byKey(const Key('setup-finish'));
+    await tester.ensureVisible(finishFinder);
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(finishFinder).onPressed, isNotNull);
+    await tester.tap(finishFinder);
     for (var attempt = 0; attempt < 40; attempt++) {
       await tester.pump(const Duration(milliseconds: 50));
       if (find.text('Your books, at a glance').evaluate().isNotEmpty) break;

@@ -13,6 +13,10 @@ import 'package:ledgerline/domain/sales_invoice.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  });
 
   test('default sales tax rate is stored and validated as basis points',
       () async {

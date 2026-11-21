@@ -2823,12 +2823,9 @@ class LedgerRepository {
     var stagedInstalled = false;
     try {
       try {
-        final readOnlyDatabase = await databaseFactoryFfi.openDatabase(
-          stagedFile.path,
-          options: OpenDatabaseOptions(readOnly: true),
-        );
+        final readOnlyDatabase = await LedgerDatabase.openReadOnly(stagedFile.path);
         try {
-          await _validateBackupStructure(readOnlyDatabase, allowLegacySchema: true);
+          await _validateBackupStructure(readOnlyDatabase.handle, allowLegacySchema: true);
         } finally {
           await readOnlyDatabase.close();
         }

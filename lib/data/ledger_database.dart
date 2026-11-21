@@ -23,6 +23,14 @@ class LedgerDatabase {
     return LedgerDatabase._(database, path);
   }
 
+  static Future<LedgerDatabase> openReadOnly(String path) async {
+    final database = await databaseFactory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(readOnly: true),
+    );
+    return LedgerDatabase._(database, path);
+  }
+
   static Future<LedgerDatabase> openInMemory() async {
     sqfliteFfiInit();
     final database = await databaseFactoryFfi.openDatabase(
