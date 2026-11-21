@@ -442,7 +442,7 @@ class _MarketRatesToolState extends State<MarketRatesTool> {
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
                   key: const Key('market-display-currency'),
-                  value: _displayCurrency,
+                  initialValue: _displayCurrency,
                   decoration: InputDecoration(labelText: tr(context, 'marketDisplayCurrency')),
                   items: [
                     for (final currency in _currencies)
@@ -573,7 +573,7 @@ class _MarketRatesToolState extends State<MarketRatesTool> {
               children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    value: _fromCurrency,
+                    initialValue: _fromCurrency,
                     decoration: InputDecoration(labelText: tr(context, 'fromCurrency')),
                     items: [for (final item in _currencies) DropdownMenuItem(value: item.$1, child: Text(item.$1))],
                     onChanged: (value) => setState(() => _fromCurrency = value ?? _fromCurrency),
@@ -590,7 +590,7 @@ class _MarketRatesToolState extends State<MarketRatesTool> {
                 ),
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    value: _toCurrency,
+                    initialValue: _toCurrency,
                     decoration: InputDecoration(labelText: tr(context, 'toCurrency')),
                     items: [for (final item in _currencies) DropdownMenuItem(value: item.$1, child: Text(item.$1))],
                     onChanged: (value) => setState(() => _toCurrency = value ?? _toCurrency),
@@ -709,7 +709,7 @@ String _formatAmount(double value, String currency) {
   final fixed = value.toStringAsFixed(decimals);
   final pieces = fixed.split('.');
   final grouped = pieces.first.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',');
-  var fractional = pieces.length > 1 ? pieces[1].replaceFirst(RegExp(r'0+$'), '') : '';
+  final fractional = pieces.length > 1 ? pieces[1].replaceFirst(RegExp(r'0+$'), '') : '';
   if (fractional.isEmpty) return grouped;
   return '$grouped.$fractional';
 }

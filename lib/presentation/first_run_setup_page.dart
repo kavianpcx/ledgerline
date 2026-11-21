@@ -202,7 +202,7 @@ class _FirstRunSetupPageState extends State<FirstRunSetupPage> {
                         ),
                         const SizedBox(height: 14),
                         DropdownButtonFormField<String>(
-                          value: _businessType,
+                          initialValue: _businessType,
                           decoration: InputDecoration(labelText: tr(context, 'setupBusinessType')),
                           items: [
                             for (final type in _businessTypes)
@@ -214,7 +214,7 @@ class _FirstRunSetupPageState extends State<FirstRunSetupPage> {
                         ),
                         const SizedBox(height: 14),
                         DropdownButtonFormField<String>(
-                          value: _countryCode,
+                          initialValue: _countryCode,
                           decoration: InputDecoration(labelText: tr(context, 'setupCountry')),
                           items: [
                             for (final country in _countries)
@@ -226,7 +226,7 @@ class _FirstRunSetupPageState extends State<FirstRunSetupPage> {
                         ),
                         const SizedBox(height: 14),
                         DropdownButtonFormField<String>(
-                          value: _currencyCode,
+                          initialValue: _currencyCode,
                           decoration: InputDecoration(labelText: tr(context, 'currency')),
                           items: [
                             for (final currency in _currencies)
@@ -238,7 +238,7 @@ class _FirstRunSetupPageState extends State<FirstRunSetupPage> {
                         ),
                         const SizedBox(height: 14),
                         DropdownButtonFormField<String>(
-                          value: _languageCode,
+                          initialValue: _languageCode,
                           decoration: InputDecoration(labelText: tr(context, 'language')),
                           items: [
                             DropdownMenuItem(value: 'en', child: Text(tr(context, 'english'))),

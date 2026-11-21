@@ -1488,7 +1488,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              value: const {'retail', 'wholesale', 'cafe', 'services', 'workshop', 'other'}
+              initialValue: const {'retail', 'wholesale', 'cafe', 'services', 'workshop', 'other'}
                       .contains(widget.settings.businessType)
                   ? widget.settings.businessType
                   : 'retail',
@@ -1505,7 +1505,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              value: const {'IR', 'AE', 'TR', 'DE', 'GB', 'US', 'OTHER'}
+              initialValue: const {'IR', 'AE', 'TR', 'DE', 'GB', 'US', 'OTHER'}
                       .contains(widget.settings.countryCode)
                   ? widget.settings.countryCode
                   : 'OTHER',
