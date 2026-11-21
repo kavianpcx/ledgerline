@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -9,6 +9,7 @@ import 'package:sqflite/sqflite.dart' as mobile_sqlite;
 
 import 'data/ledger_database.dart';
 import 'data/ledger_repository.dart';
+import 'domain/app_settings.dart';
 import 'presentation/ledger_app.dart';
 
 Future<void> main() async {
@@ -36,25 +37,97 @@ Future<void> main() async {
     }
   }
 
-  final appSupport = await getApplicationSupportDirectory();
-  final databaseDirectory = Directory(p.join(appSupport.path, 'ledgerline'));
-  await databaseDirectory.create(recursive: true);
-
-  final database = await LedgerDatabase.open(
-    p.join(databaseDirectory.path, 'ledgerline.sqlite'),
-  );
-  final repository = LedgerRepository(database);
-  await repository.initialize();
-  final settings = await repository.loadAppSettings();
   final visualScenario = const String.fromEnvironment('LEDGERLINE_VISUAL_SCENARIO');
-
-  runApp(LedgerApp(
-    repository: repository,
-    initialSettings: visualScenario.isEmpty ? settings : settings.copyWith(setupCompleted: true),
-    visualScenario: visualScenario,
-  ));
+  runApp(_LedgerStartup(visualScenario: visualScenario));
   if (desktopWindow != null) {
-    await WidgetsBinding.instance.waitUntilFirstFrameRasterized;
-    desktopWindow.show();
+    WidgetsBinding.instance.addPostFrameCallback((_) => desktopWindow!.show());
+  }
+}
+
+class _LedgerStartup extends StatefulWidget {
+  const _LedgerStartup({required this.visualScenario});
+
+  final String visualScenario;
+
+  @override
+  State<_LedgerStartup> createState() => _LedgerStartupState();
+}
+
+class _LedgerStartupState extends State<_LedgerStartup> {
+  Widget? _application;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    try {
+      final appSupport = await getApplicationSupportDirectory();
+      final databaseDirectory = Directory(p.join(appSupport.path, 'ledgerline'));
+      await databaseDirectory.create(recursive: true);
+      final database = await LedgerDatabase.open(
+        p.join(databaseDirectory.path, 'ledgerline.sqlite'),
+      );
+      final repository = LedgerRepository(database);
+      await repository.initialize();
+      final settings = await repository.loadAppSettings();
+      if (!mounted) return;
+      setState(() {
+        _application = LedgerApp(
+          repository: repository,
+          initialSettings: widget.visualScenario.isEmpty
+              ? settings
+              : settings.copyWith(setupCompleted: true),
+          visualScenario: widget.visualScenario,
+        );
+      });
+    } catch (error) {
+      if (mounted) setState(() => _error = error);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_application case final app?) return app;
+    return MaterialApp(
+      title: 'Ledgerline',
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: const Color(0xFFF5F7F5),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.account_balance_wallet_outlined,
+                      color: Color(0xFF087E78), size: 44),
+                  const SizedBox(height: 16),
+                  const Text('Ledgerline',
+                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 20),
+                  if (_error == null) ...[
+                    const CircularProgressIndicator(color: Color(0xFF087E78)),
+                    const SizedBox(height: 12),
+                    const Text('Preparing your local books…'),
+                  ] else ...[
+                    const Text('Ledgerline could not open its local data.'),
+                    const SizedBox(height: 8),
+                    Text('$_error', textAlign: TextAlign.center),
+                    const SizedBox(height: 16),
+                    FilledButton(onPressed: _initialize, child: const Text('Retry')),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
