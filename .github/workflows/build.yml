@@ -1,4 +1,4 @@
-name: Windows build
+name: Ledgerline CI
 
 on:
   push:
@@ -43,6 +43,7 @@ jobs:
           - test/update_service_test.dart
           - test/searchable_select_test.dart
           - test/settings_control_center_test.dart
+          - test/calculator_and_market_rates_test.dart
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux window dependencies
@@ -222,7 +223,7 @@ jobs:
           $smokeProcess.Dispose()
           $evidenceDirectory = Join-Path $PWD 'ui-evidence'
           New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
-          $scenarios = @('titlebar', 'windows-sidebar-wide', 'windows-sidebar-medium', 'windows-sidebar-narrow', 'settings-light', 'settings-dark', 'settings-fa', 'currency-popup')
+          $scenarios = @('titlebar', 'windows-sidebar-wide', 'windows-sidebar-medium', 'windows-sidebar-narrow', 'settings-light', 'settings-dark', 'settings-fa', 'currency-popup', 'more-tools')
           foreach ($scenario in $scenarios) {
             Write-Host "Building visual scenario: $scenario"
             & flutter build windows --debug "--dart-define=LEDGERLINE_VISUAL_SCENARIO=$scenario"
@@ -311,9 +312,42 @@ jobs:
           path: ui-evidence/*.png
           if-no-files-found: error
 
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [analyze, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Android runner
+        run: flutter create --platforms=android --project-name=ledgerline --org=com.ledgerline .
+      - name: Enable Android network access
+        run: python3 tool/patch_android_manifest.py
+      - name: Resolve dependencies
+        run: flutter pub get
+      - name: Read application version
+        shell: bash
+        run: |
+          app_version="$(sed -n 's/^version: //p' pubspec.yaml | head -n1 | cut -d+ -f1)"
+          echo "APP_VERSION=$app_version" >> "$GITHUB_ENV"
+      - name: Build Android APK
+        run: flutter build apk --release --dart-define=APP_VERSION=$APP_VERSION
+      - name: Prepare release APK
+        run: |
+          mkdir -p release-assets
+          cp build/app/outputs/flutter-apk/app-release.apk release-assets/ledgerline-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ledgerline-android-apk
+          path: release-assets/ledgerline-android.apk
+          if-no-files-found: error
+
   publish-release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release]')
-    needs: [analyze, test, windows]
+    needs: [analyze, test, windows, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -333,6 +367,10 @@ jobs:
         with:
           name: ledgerline-ui-evidence
           path: release-assets/ui-evidence
+      - uses: actions/download-artifact@v4
+        with:
+          name: ledgerline-android-apk
+          path: release-assets
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -340,5 +378,6 @@ jobs:
           prerelease: ${{ contains(steps.version.outputs.tag, '-') }}
           files: |
             release-assets/ledgerline-windows-setup.exe
+            release-assets/ledgerline-android.apk
             release-assets/ui-evidence/*.png
           generate_release_notes: true

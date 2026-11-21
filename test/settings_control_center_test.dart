@@ -28,7 +28,7 @@ void main() {
 
     await tester.pumpWidget(LedgerApp(
       repository: repository,
-      initialSettings: AppSettings.defaults,
+      initialSettings: AppSettings.defaults.copyWith(setupCompleted: true),
       visualScenario: 'settings-light',
     ));
     for (var attempt = 0; attempt < 40; attempt++) {

@@ -5,17 +5,20 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class UpdateInfo {
   const UpdateInfo({
     required this.version,
     required this.downloadUrl,
     required this.sha256,
+    this.isAndroidApk = false,
   });
 
   final String version;
   final String downloadUrl;
   final String sha256;
+  final bool isAndroidApk;
 }
 
 class UpdateService {
@@ -23,35 +26,50 @@ class UpdateService {
 
   static const _repository = 'kavianpcx/ledgerline';
   static const _installerName = 'ledgerline-windows-setup.exe';
+  static const _androidPackageName = 'ledgerline-android.apk';
   static const _allowedDownloadHosts = {
     'github.com',
     'release-assets.githubusercontent.com',
     'objects.githubusercontent.com',
   };
-  static const _maximumInstallerSize = 256 * 1024 * 1024;
+  static const _maximumInstallerSize = 512 * 1024 * 1024;
 
   static bool isVersionNewer(String candidate, String current) {
-    final candidateParts = _versionParts(candidate);
-    final currentParts = _versionParts(current);
-    if (candidateParts == null || currentParts == null) return false;
+    final candidateVersion = _parseVersion(candidate);
+    final currentVersion = _parseVersion(current);
+    if (candidateVersion == null || currentVersion == null) return false;
     for (var index = 0; index < 3; index++) {
-      if (candidateParts[index] != currentParts[index]) {
-        return candidateParts[index] > currentParts[index];
+      if (candidateVersion.parts[index] != currentVersion.parts[index]) {
+        return candidateVersion.parts[index] > currentVersion.parts[index];
       }
     }
-    return false;
+    if (candidateVersion.prerelease == null) return currentVersion.prerelease != null;
+    if (currentVersion.prerelease == null) return false;
+    for (var index = 0; index < candidateVersion.prerelease!.length && index < currentVersion.prerelease!.length; index++) {
+      final candidateIdentifier = candidateVersion.prerelease![index];
+      final currentIdentifier = currentVersion.prerelease![index];
+      if (candidateIdentifier == currentIdentifier) continue;
+      final candidateNumber = int.tryParse(candidateIdentifier);
+      final currentNumber = int.tryParse(currentIdentifier);
+      if (candidateNumber != null && currentNumber != null) return candidateNumber > currentNumber;
+      if (candidateNumber != null) return true;
+      if (currentNumber != null) return false;
+      return candidateIdentifier.compareTo(currentIdentifier) > 0;
+    }
+    return candidateVersion.prerelease!.length > currentVersion.prerelease!.length;
   }
 
   static String sha256Hex(List<int> bytes) => sha256.convert(bytes).toString();
 
   Future<UpdateInfo?> checkForUpdate({
     required String currentVersion,
+    bool android = false,
   }) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 5);
     try {
       final request = await client
-          .getUrl(Uri.https('api.github.com', '/repos/' + _repository + '/releases/latest'))
+          .getUrl(Uri.https('api.github.com', '/repos/' + _repository + '/releases', {'per_page': '100'}))
           .timeout(const Duration(seconds: 10));
       request.followRedirects = false;
       request.headers.set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
@@ -64,36 +82,44 @@ class UpdateService {
       final release = jsonDecode(
         await utf8.decoder.bind(response).join().timeout(const Duration(seconds: 10)),
       );
-      if (release is! Map<String, dynamic>) {
-        throw const FormatException('Invalid release response.');
-      }
-      if (release['draft'] == true || release['prerelease'] == true) return null;
-
-      final tag = release['tag_name'];
-      if (tag is! String || !isVersionNewer(tag, currentVersion)) return null;
-
-      final assets = release['assets'];
-      if (assets is! List) throw const FormatException('Release assets are missing.');
-      Map<String, dynamic>? installer;
-      for (final item in assets) {
-        if (item is Map<String, dynamic> && item['name'] == _installerName) {
-          installer = item;
-          break;
+      if (release is! List) throw const FormatException('Invalid release list.');
+      final allowPrereleases = currentVersion.contains('-');
+      Map<String, dynamic>? selectedRelease;
+      Map<String, dynamic>? selectedAsset;
+      String? selectedTag;
+      for (final item in release) {
+        if (item is! Map<String, dynamic> || item['draft'] == true) continue;
+        if (item['prerelease'] == true && !allowPrereleases) continue;
+        final tag = item['tag_name'];
+        if (tag is! String || !isVersionNewer(tag, currentVersion)) continue;
+        final assets = item['assets'];
+        if (assets is! List) continue;
+        final assetName = android ? _androidPackageName : _installerName;
+        Map<String, dynamic>? candidateAsset;
+        for (final asset in assets) {
+          if (asset is Map<String, dynamic> && asset['name'] == assetName) {
+            candidateAsset = asset;
+            break;
+          }
+        }
+        if (candidateAsset == null || candidateAsset['state'] != 'uploaded') continue;
+        if (selectedTag == null || isVersionNewer(tag, selectedTag)) {
+          selectedRelease = item;
+          selectedAsset = candidateAsset;
+          selectedTag = tag;
         }
       }
-      if (installer == null || installer['state'] != 'uploaded') {
-        throw StateError('The latest release does not include a completed Windows installer.');
-      }
+      if (selectedRelease == null || selectedAsset == null || selectedTag == null) return null;
 
-      final digestValue = installer['digest'];
+      final digestValue = selectedAsset['digest'];
       final digestMatch = digestValue is String
           ? RegExp(r'^sha256:([0-9a-fA-F]{64})$').firstMatch(digestValue)
           : null;
       if (digestMatch == null) {
-        throw StateError('GitHub did not provide a SHA-256 digest for the installer.');
+        throw StateError('GitHub did not provide a SHA-256 digest for the release package.');
       }
 
-      final downloadValue = installer['browser_download_url'];
+      final downloadValue = selectedAsset['browser_download_url'];
       final downloadUri = downloadValue is String ? Uri.tryParse(downloadValue) : null;
       if (downloadUri == null ||
           downloadUri.scheme != 'https' ||
@@ -101,12 +127,13 @@ class UpdateService {
           downloadUri.userInfo.isNotEmpty ||
           (downloadUri.hasPort && downloadUri.port != 443) ||
           !downloadUri.path.startsWith('/' + _repository + '/releases/download/')) {
-        throw StateError('The release installer URL is not trusted.');
+        throw StateError('The release package URL is not trusted.');
       }
       return UpdateInfo(
-        version: tag,
+        version: selectedTag,
         downloadUrl: downloadUri.toString(),
         sha256: digestMatch.group(1)!.toLowerCase(),
+        isAndroidApk: android,
       );
     } finally {
       client.close(force: true);
@@ -114,7 +141,10 @@ class UpdateService {
   }
 
   Future<File> downloadAndVerify(UpdateInfo update) async {
-    if (_versionParts(update.version) == null) {
+    if (update.isAndroidApk) {
+      throw StateError('Android packages must be installed through Android.');
+    }
+    if (_parseVersion(update.version) == null) {
       throw StateError('The update version is invalid.');
     }
     final client = HttpClient()
@@ -168,19 +198,20 @@ class UpdateService {
     }
   }
 
-  static List<int>? _versionParts(String value) {
-    final normalized = value
-        .trim()
-        .replaceFirst(RegExp(r'^[vV]'), '')
-        .split('+')
-        .first
-        .split('-')
-        .first;
-    final parts = normalized.split('.');
-    if (parts.length != 3) return null;
-    final numbers = parts.map(int.tryParse).toList(growable: false);
-    if (numbers.any((number) => number == null)) return null;
-    return numbers.cast<int>();
+  static _ParsedVersion? _parseVersion(String value) {
+    final normalized = value.trim().replaceFirst(RegExp(r'^[vV]'), '').split('+').first;
+    final separator = normalized.indexOf('-');
+    final core = separator < 0 ? normalized : normalized.substring(0, separator);
+    final prerelease = separator < 0 ? null : normalized.substring(separator + 1).split('.');
+    if (prerelease != null && (prerelease.isEmpty || prerelease.any((part) => part.isEmpty))) return null;
+    final parts = core.split('.').map(int.tryParse).toList(growable: false);
+    if (parts.length != 3 || parts.any((part) => part == null)) return null;
+    return _ParsedVersion(parts.cast<int>(), prerelease);
+  }
+
+  Future<bool> openAndroidUpdate(UpdateInfo update) async {
+    if (!update.isAndroidApk) throw ArgumentError('The update is not an Android package.');
+    return launchUrl(Uri.parse(update.downloadUrl), mode: LaunchMode.externalApplication);
   }
 
   static bool _isRedirect(int statusCode) =>
@@ -198,4 +229,11 @@ class UpdateService {
       throw StateError('The installer download redirected to an untrusted host.');
     }
   }
+}
+
+class _ParsedVersion {
+  const _ParsedVersion(this.parts, this.prerelease);
+
+  final List<int> parts;
+  final List<String>? prerelease;
 }

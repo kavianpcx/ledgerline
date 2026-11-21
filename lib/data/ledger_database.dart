@@ -9,7 +9,7 @@ class LedgerDatabase {
   Database get handle => _database;
 
   static Future<LedgerDatabase> open(String path) async {
-    final database = await databaseFactoryFfi.openDatabase(
+    final database = await databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
         version: 11,
@@ -19,6 +19,14 @@ class LedgerDatabase {
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
       ),
+    );
+    return LedgerDatabase._(database, path);
+  }
+
+  static Future<LedgerDatabase> openReadOnly(String path) async {
+    final database = await databaseFactory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(readOnly: true),
     );
     return LedgerDatabase._(database, path);
   }

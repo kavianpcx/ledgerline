@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.6.0-beta.1
+
+- Add first-run business setup for name, type, country, language, and base accounting currency. Require explicit confirmation before assigning a currency to legacy monetary values.
+- Replace duplicate navigation shortcuts in More Tools with a calculator, Smart Import shortcut, and currency market/converter tools.
+- Add a precedence-aware calculator with percentage operations and arithmetic validation.
+- Add timestamped Tehran free-market currency cards from NerkhAra, selectable display currency, stale-rate handling, manual refresh, and a converter with optional arithmetic. Market rates remain display-only and never post to the ledger.
+- Add a compact Android camera barcode scanner dialog to product forms with scan feedback and barcode persistence on product save.
+- Use SQLite's Android database plugin on Android while retaining FFI SQLite on Windows and in tests.
+- Add a universal Android APK build to CI and attach it to prereleases. Android installation remains under the OS approval flow.
+- Extend release discovery to prereleases for beta builds, add Android APK update handoff, and compare prerelease versions correctly.
+- Add a More Tools screenshot to the release UI evidence and publish both Windows and Android artifacts.
+- Select the MIT License for Ledgerline source; keep the bundled Noto font under OFL.
+
+## Earlier changes included in this release
 
 - Require an explicit base accounting currency before recording monetary data.
 - Ask owners to confirm the currency of legacy records without changing amounts.

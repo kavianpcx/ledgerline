@@ -13,6 +13,10 @@ import 'package:ledgerline/domain/sales_invoice.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  });
 
   test('default sales tax rate is stored and validated as basis points',
       () async {
@@ -1029,14 +1033,22 @@ void main() {
       darkMode: true,
       languageCode: 'fa',
       businessName: 'Northstar Books',
+      businessType: 'cafe',
+      countryCode: 'IR',
       currencyCode: 'EUR',
+      marketDisplayCurrencyCode: 'AED',
+      setupCompleted: true,
     ));
     final settings = await repository.loadAppSettings();
 
     expect(settings.darkMode, isTrue);
     expect(settings.languageCode, 'fa');
     expect(settings.businessName, 'Northstar Books');
+    expect(settings.businessType, 'cafe');
+    expect(settings.countryCode, 'IR');
     expect(settings.currencyCode, 'EUR');
+    expect(settings.marketDisplayCurrencyCode, 'AED');
+    expect(settings.setupCompleted, isTrue);
   });
 
   test('exports a consistent SQLite backup', () async {

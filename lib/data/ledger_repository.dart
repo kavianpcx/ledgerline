@@ -2602,10 +2602,20 @@ class LedgerRepository {
       darkMode: values['dark_mode'] == 'true',
       languageCode: values['language_code'] == 'fa' ? 'fa' : 'en',
       businessName: values['business_name'] ?? '',
+      businessType: values['business_type'] ?? 'retail',
+      countryCode: values['country_code'] ?? '',
       currencyCode: _supportedCurrencies.contains(values['currency_code'])
           ? values['currency_code']!
           : 'USD',
+      marketDisplayCurrencyCode: _marketDisplayCurrencies.contains(
+        values['market_display_currency_code'],
+      )
+          ? values['market_display_currency_code']!
+          : 'TOMAN',
       accountingCurrencyConfigured: values['accounting_currency_configured'] == 'true',
+      setupCompleted: values['setup_completed'] == 'true' ||
+          values['accounting_currency_configured'] == 'true' ||
+          (values['business_name']?.trim().isNotEmpty ?? false),
       desktopSidebarCollapsed: values['desktop_sidebar_collapsed'] == 'true',
       defaultTaxRateBasisPoints: _parseDefaultTaxRateBasisPoints(values['default_tax_rate_basis_points']),
     );
@@ -2698,6 +2708,14 @@ class LedgerRepository {
         'Unsupported currency.',
       );
     }
+    final requestedMarketCurrency = settings.marketDisplayCurrencyCode.toUpperCase();
+    if (!_marketDisplayCurrencies.contains(requestedMarketCurrency)) {
+      throw ArgumentError.value(
+        settings.marketDisplayCurrencyCode,
+        'marketDisplayCurrencyCode',
+        'Unsupported market display currency.',
+      );
+    }
     final database = _database.handle;
     await database.transaction((txn) async {
       final rows = await txn.query(
@@ -2734,7 +2752,19 @@ class LedgerRepository {
         {'setting_key': 'business_name', 'setting_value': settings.businessName.trim()},
         conflictAlgorithm: ConflictAlgorithm.replace);
       await txn.insert('app_settings',
+        {'setting_key': 'business_type', 'setting_value': settings.businessType},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
+        {'setting_key': 'country_code', 'setting_value': settings.countryCode},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
+        {'setting_key': 'setup_completed', 'setting_value': '${settings.setupCompleted}'},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
         {'setting_key': 'currency_code', 'setting_value': requestedCurrencyCode},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
+        {'setting_key': 'market_display_currency_code', 'setting_value': requestedMarketCurrency},
         conflictAlgorithm: ConflictAlgorithm.replace);
       await txn.insert('app_settings',
         {'setting_key': 'accounting_currency_configured', 'setting_value': '${configured}'},
@@ -2793,12 +2823,9 @@ class LedgerRepository {
     var stagedInstalled = false;
     try {
       try {
-        final readOnlyDatabase = await databaseFactoryFfi.openDatabase(
-          stagedFile.path,
-          options: OpenDatabaseOptions(readOnly: true),
-        );
+        final readOnlyDatabase = await LedgerDatabase.openReadOnly(stagedFile.path);
         try {
-          await _validateBackupStructure(readOnlyDatabase, allowLegacySchema: true);
+          await _validateBackupStructure(readOnlyDatabase.handle, allowLegacySchema: true);
         } finally {
           await readOnlyDatabase.close();
         }
@@ -2903,6 +2930,7 @@ class LedgerRepository {
   }
 
   static const _supportedCurrencies = CurrencyDefinition.codes;
+  static const _marketDisplayCurrencies = {'TOMAN', 'IRR', 'USD', 'EUR', 'AED'};
 
   static String _dateOnly(DateTime date) =>
       '${date.year.toString().padLeft(4, '0')}-'
