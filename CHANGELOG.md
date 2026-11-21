@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0-beta.1
+
+- Show the Windows window only after Flutter rasterizes its first frame; validate screenshot captures contain rendered app UI before publishing them.
+- Replace the invalid blank README preview with a verified More Tools screenshot from this release.
+- Add country and currency flags to currency quote cards.
+- Restyle the calculator as a Windows-style standard calculator with memory controls, percentage and unary operations, plus full keyboard input.
+- Add optional 6–12 digit passcode protection during first-run setup and in Security settings, with salted PBKDF2 verification and a retry delay.
+- Add Android biometric unlock when the device has enrolled biometrics; Android still requires the passcode as fallback.
+- Add Android biometric permission and FragmentActivity setup for the authentication plugin.
+
 ## 0.6.0-beta.1
 
 - Add first-run business setup for name, type, country, language, and base accounting currency. Require explicit confirmation before assigning a currency to legacy monetary values.

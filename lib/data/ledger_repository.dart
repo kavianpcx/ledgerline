@@ -2618,6 +2618,13 @@ class LedgerRepository {
           (values['business_name']?.trim().isNotEmpty ?? false),
       desktopSidebarCollapsed: values['desktop_sidebar_collapsed'] == 'true',
       defaultTaxRateBasisPoints: _parseDefaultTaxRateBasisPoints(values['default_tax_rate_basis_points']),
+      securityLockEnabled: values['security_lock_enabled'] == 'true' &&
+          (values['security_salt']?.isNotEmpty ?? false) &&
+          (values['security_hash']?.isNotEmpty ?? false),
+      securityPromptSeen: values['security_prompt_seen'] == 'true',
+      securitySalt: values['security_salt'] ?? '',
+      securityHash: values['security_hash'] ?? '',
+      biometricUnlockEnabled: values['biometric_unlock_enabled'] == 'true',
     );
   }
 
@@ -2700,6 +2707,13 @@ class LedgerRepository {
         'Tax rate must be between 0 and 100 percent.',
       );
     }
+    if (settings.securityLockEnabled &&
+        (settings.securitySalt.isEmpty || settings.securityHash.isEmpty)) {
+      throw ArgumentError('A passcode must be set before enabling the app lock.');
+    }
+    if (!settings.securityLockEnabled && settings.biometricUnlockEnabled) {
+      throw ArgumentError('Biometric unlock requires the app lock.');
+    }
     final requestedCurrencyCode = settings.currencyCode.toUpperCase();
     if (!_supportedCurrencies.contains(requestedCurrencyCode)) {
       throw ArgumentError.value(
@@ -2774,6 +2788,21 @@ class LedgerRepository {
         conflictAlgorithm: ConflictAlgorithm.replace);
       await txn.insert('app_settings',
         {'setting_key': 'default_tax_rate_basis_points', 'setting_value': '${settings.defaultTaxRateBasisPoints}'},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
+        {'setting_key': 'security_lock_enabled', 'setting_value': '${settings.securityLockEnabled}'},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
+        {'setting_key': 'security_prompt_seen', 'setting_value': '${settings.securityPromptSeen}'},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
+        {'setting_key': 'security_salt', 'setting_value': settings.securitySalt},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
+        {'setting_key': 'security_hash', 'setting_value': settings.securityHash},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('app_settings',
+        {'setting_key': 'biometric_unlock_enabled', 'setting_value': '${settings.biometricUnlockEnabled}'},
         conflictAlgorithm: ConflictAlgorithm.replace);
     });
   }

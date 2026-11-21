@@ -1,7 +1,7 @@
 name: ledgerline
 description: Offline-first double-entry accounting for Windows and Android.
 publish_to: "none"
-version: 0.6.0-beta.1+1
+version: 0.7.0-beta.1+1
 
 environment:
   sdk: ">=3.10.0 <4.0.0"
@@ -14,6 +14,8 @@ dependencies:
   excel: ^4.0.6
   mobile_scanner: ^7.5.0
   crypto: ^3.0.8
+  cryptography: ^2.9.0
+  local_auth: ^3.0.2
   path: ^1.9.1
   path_provider: ^2.1.6
   pdf: ^3.12.0

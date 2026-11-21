@@ -2,7 +2,7 @@ name: Ledgerline CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feature/**']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -44,6 +44,8 @@ jobs:
           - test/searchable_select_test.dart
           - test/settings_control_center_test.dart
           - test/calculator_and_market_rates_test.dart
+          - test/security_service_test.dart
+          - test/security_lock_page_test.dart
     steps:
       - uses: actions/checkout@v4
       - name: Install Linux window dependencies
@@ -68,6 +70,8 @@ jobs:
           cache: true
       - name: Generate Windows runner
         run: flutter create --platforms=windows --project-name=ledgerline --org=com.ledgerline .
+      - name: Patch Windows biometrics compiler compatibility
+        run: python3 tool/patch_windows_cmake.py
       - name: Install Ledgerline Windows shortcuts
         shell: pwsh
         run: ./tool/patch_windows_shortcuts.ps1
@@ -169,6 +173,8 @@ jobs:
             [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr handle);
             [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr handle);
             [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr handle);
+            [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left; public int Top; public int Right; public int Bottom; }
+            [DllImport("user32.dll", SetLastError = true)] public static extern bool GetWindowRect(IntPtr handle, out Rect rect);
             [DllImport("user32.dll", SetLastError = true)] public static extern bool MoveWindow(IntPtr handle, int x, int y, int width, int height, bool repaint);
             [StructLayout(LayoutKind.Sequential)] public struct Input {
               public uint type;
@@ -290,10 +296,39 @@ jobs:
             }
             [LedgerlineWindowTest]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
             Start-Sleep -Seconds 3
+            $windowRect = [LedgerlineWindowTest+Rect]::new()
+            if (-not [LedgerlineWindowTest]::GetWindowRect($process.MainWindowHandle, [ref]$windowRect)) {
+              throw "Could not inspect the Ledgerline window for $scenario."
+            }
             $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-            $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
-            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $uiRendered = $false
+            for ($attempt = 0; $attempt -lt 20; $attempt++) {
+              $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+              $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+              $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+              $colors = [System.Collections.Generic.HashSet[int]]::new()
+              for ($y = [Math]::Max(0, $windowRect.Top + 24); $y -lt [Math]::Min($bounds.Height, $windowRect.Bottom - 20); $y += 8) {
+                for ($x = [Math]::Max(0, $windowRect.Left + 8); $x -lt [Math]::Min($bounds.Width, $windowRect.Right - 8); $x += 8) {
+                  [void]$colors.Add($bitmap.GetPixel($x, $y).ToArgb())
+                }
+              }
+              if ($colors.Count -ge 12) { $uiRendered = $true; break }
+              if ($attempt -lt 19) {
+                $graphics.Dispose()
+                $bitmap.Dispose()
+                Start-Sleep -Seconds 1
+                $process.Refresh()
+                if ($process.HasExited) { throw "Ledgerline exited before rendering $scenario." }
+              }
+            }
+            if (-not $uiRendered) {
+              $diagnosticPath = Join-Path $evidenceDirectory ($scenario + '-diagnostic.png')
+              $bitmap.Save($diagnosticPath, [System.Drawing.Imaging.ImageFormat]::Png)
+              Write-Host "Rendered-color check found $($colors.Count) distinct colors for $scenario. Diagnostic screenshot: $diagnosticPath"
+              $graphics.Dispose()
+              $bitmap.Dispose()
+              throw "Ledgerline window stayed blank instead of rendering $scenario."
+            }
             $bitmap.Save((Join-Path $evidenceDirectory ($scenario + '.png')), [System.Drawing.Imaging.ImageFormat]::Png)
             $graphics.Dispose()
             $bitmap.Dispose()
@@ -307,10 +342,11 @@ jobs:
           path: installer/output/ledgerline-windows-setup.exe
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: ledgerline-ui-evidence
           path: ui-evidence/*.png
-          if-no-files-found: error
+          if-no-files-found: warn
 
   android:
     runs-on: ubuntu-latest
@@ -324,7 +360,7 @@ jobs:
           cache: true
       - name: Generate Android runner
         run: flutter create --platforms=android --project-name=ledgerline --org=com.ledgerline .
-      - name: Enable Android network access
+      - name: Configure Android network and biometric authentication
         run: python3 tool/patch_android_manifest.py
       - name: Resolve dependencies
         run: flutter pub get

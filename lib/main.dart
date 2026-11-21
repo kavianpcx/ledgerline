@@ -20,19 +20,19 @@ Future<void> main() async {
     ffi.databaseFactory = mobile_sqlite.databaseFactory;
   }
 
+  Window? desktopWindow;
   if (Platform.isWindows) {
-    final window = WindowManager.instance.getCurrent();
-    if (window != null) {
-      window.title = 'Ledgerline';
-      window.titleBarStyle = TitleBarStyle.hidden;
-      window.isResizable = true;
-      window.isMinimizable = true;
-      window.isMaximizable = true;
-      window.isClosable = true;
-      window.minimumSize = const Size(860, 600).toNative();
-      window.setSize(const Size(1440, 900).toNative(), false);
-      window.center();
-      window.show();
+    desktopWindow = WindowManager.instance.getCurrent();
+    if (desktopWindow != null) {
+      desktopWindow.title = 'Ledgerline';
+      desktopWindow.titleBarStyle = TitleBarStyle.hidden;
+      desktopWindow.isResizable = true;
+      desktopWindow.isMinimizable = true;
+      desktopWindow.isMaximizable = true;
+      desktopWindow.isClosable = true;
+      desktopWindow.minimumSize = const Size(860, 600).toNative();
+      desktopWindow.setSize(const Size(1440, 900).toNative(), false);
+      desktopWindow.center();
     }
   }
 
@@ -53,4 +53,8 @@ Future<void> main() async {
     initialSettings: visualScenario.isEmpty ? settings : settings.copyWith(setupCompleted: true),
     visualScenario: visualScenario,
   ));
+  if (desktopWindow != null) {
+    await WidgetsBinding.instance.waitUntilFirstFrameRasterized;
+    desktopWindow.show();
+  }
 }

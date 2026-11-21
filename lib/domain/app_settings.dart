@@ -11,6 +11,11 @@ class AppSettings {
     this.setupCompleted = false,
     this.desktopSidebarCollapsed = false,
     this.defaultTaxRateBasisPoints = 0,
+    this.securityLockEnabled = false,
+    this.securityPromptSeen = false,
+    this.securitySalt = '',
+    this.securityHash = '',
+    this.biometricUnlockEnabled = false,
   });
 
   static const defaults = AppSettings(
@@ -29,6 +34,11 @@ class AppSettings {
   final bool setupCompleted;
   final bool desktopSidebarCollapsed;
   final int defaultTaxRateBasisPoints;
+  final bool securityLockEnabled;
+  final bool securityPromptSeen;
+  final String securitySalt;
+  final String securityHash;
+  final bool biometricUnlockEnabled;
 
   AppSettings copyWith({
     bool? darkMode,
@@ -42,6 +52,11 @@ class AppSettings {
     bool? setupCompleted,
     bool? desktopSidebarCollapsed,
     int? defaultTaxRateBasisPoints,
+    bool? securityLockEnabled,
+    bool? securityPromptSeen,
+    String? securitySalt,
+    String? securityHash,
+    bool? biometricUnlockEnabled,
   }) => AppSettings(
         darkMode: darkMode ?? this.darkMode,
         languageCode: languageCode ?? this.languageCode,
@@ -54,5 +69,10 @@ class AppSettings {
         setupCompleted: setupCompleted ?? this.setupCompleted,
         desktopSidebarCollapsed: desktopSidebarCollapsed ?? this.desktopSidebarCollapsed,
         defaultTaxRateBasisPoints: defaultTaxRateBasisPoints ?? this.defaultTaxRateBasisPoints,
+        securityLockEnabled: securityLockEnabled ?? this.securityLockEnabled,
+        securityPromptSeen: securityPromptSeen ?? this.securityPromptSeen,
+        securitySalt: securitySalt ?? this.securitySalt,
+        securityHash: securityHash ?? this.securityHash,
+        biometricUnlockEnabled: biometricUnlockEnabled ?? this.biometricUnlockEnabled,
       );
 }

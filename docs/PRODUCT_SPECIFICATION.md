@@ -1,6 +1,6 @@
 # Ledgerline product specification
 
-This document defines the product target, not the currently shipped feature set. See README and PRODUCT_AUDIT for implementation status. Android remains required even though no Android release is available yet.
+This document defines the product target, not the currently shipped feature set. See README and PRODUCT_AUDIT for implementation status. Android APK packaging is available in beta releases; physical-device acceptance remains separate.
 
 This file records the product requirements supplied in the project directive. It is the source of truth for product scope. Implementation status and known risks are tracked separately in [PRODUCT_AUDIT.md](PRODUCT_AUDIT.md).
 

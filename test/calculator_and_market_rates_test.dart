@@ -1,5 +1,8 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:ledgerline/domain/calculator.dart';
+import 'package:ledgerline/presentation/more_tools_page.dart';
 import 'package:ledgerline/services/market_rates_service.dart';
 
 void main() {
@@ -61,6 +64,51 @@ void main() {
     final offlineService = MarketRatesService(loader: () async => throw StateError('offline'));
     final cached = await offlineService.fetchLatest();
     expect(cached.cached, isTrue);
+  });
+
+  testWidgets('calculator accepts number-pad input, operators, and Enter', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: MoreToolsPage(
+          marketDisplayCurrency: 'TOMAN',
+          onMarketDisplayCurrencyChanged: (_) async {},
+          onOpenSmartImport: () {},
+        ),
+      ),
+    ));
+    await tester.tap(find.byKey(const Key('more-tool-calculator')));
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.numpad1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.numpadAdd);
+    await tester.sendKeyEvent(LogicalKeyboardKey.numpad2);
+    await tester.sendKeyEvent(LogicalKeyboardKey.numpadEnter);
+    await tester.pump();
+
+    expect(tester.widget<Text>(find.byKey(const Key('calculator-expression'))).data, '3');
+    expect(tester.widget<Text>(find.byKey(const Key('calculator-result'))).data, '3');
+  });
+
+  testWidgets('currency quote cards use their country flags', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: MarketRatesTool(
+          initialDisplayCurrency: 'TOMAN',
+          onDisplayCurrencyChanged: (_) async {},
+          service: MarketRatesService(loader: () async => _sampleRates),
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('currency-flag-USD')), findsOneWidget);
+    expect(find.text('🇺🇸'), findsOneWidget);
+    expect(find.byKey(const Key('currency-flag-EUR')), findsOneWidget);
+    expect(find.text('🇪🇺'), findsOneWidget);
+    expect(find.byKey(const Key('currency-flag-AED')), findsOneWidget);
+    expect(find.text('🇦🇪'), findsOneWidget);
   });
 }
 
