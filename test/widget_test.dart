@@ -35,6 +35,10 @@ void main() {
   });
 
   testWidgets('first launch asks for business details and confirms the accounting currency', (tester) async {
+    tester.view.physicalSize = const Size(800, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final database = (await tester.runAsync(LedgerDatabase.openInMemory))!;
     addTearDown(() async {
       await tester.runAsync(database.close);
@@ -59,8 +63,7 @@ void main() {
     }
     await tester.enterText(find.byType(TextField).first, 'Corner Shop');
     final finishFinder = find.byKey(const Key('setup-finish'));
-    await tester.ensureVisible(finishFinder);
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(tester.widget<FilledButton>(finishFinder).onPressed, isNotNull);
     await tester.tap(finishFinder);
     for (var attempt = 0; attempt < 40; attempt++) {
