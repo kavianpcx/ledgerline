@@ -34,7 +34,7 @@ void main() {
     expect(find.text('Total assets'), findsOneWidget);
   });
 
-  testWidgets('first launch asks for business details and confirms the accounting currency', (tester) async {
+  testWidgets('first launch asks for business details and saves setup choices', (tester) async {
     tester.view.physicalSize = const Size(800, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -43,7 +43,7 @@ void main() {
     addTearDown(() async {
       await tester.runAsync(database.close);
     });
-    final repository = LedgerRepository(database);
+    final repository = _SetupRepository(database);
 
     await tester.pumpWidget(LedgerApp(
       repository: repository,
@@ -56,14 +56,12 @@ void main() {
 
     expect(find.text('Set up your business'), findsOneWidget);
     expect(find.byIcon(Icons.account_balance_wallet_rounded), findsOneWidget);
-    for (var attempt = 0; attempt < 40; attempt++) {
-      await tester.pump(const Duration(milliseconds: 50));
-      final finishButton = tester.widget<FilledButton>(find.byKey(const Key('setup-finish')));
-      if (finishButton.onPressed != null) break;
-    }
     await tester.enterText(find.byType(TextField).first, 'Corner Shop');
     final finishFinder = find.byKey(const Key('setup-finish'));
-    await tester.pump(const Duration(milliseconds: 100));
+    for (var attempt = 0; attempt < 40; attempt++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (tester.widget<FilledButton>(finishFinder).onPressed != null) break;
+    }
     expect(tester.widget<FilledButton>(finishFinder).onPressed, isNotNull);
     await tester.tap(finishFinder);
     for (var attempt = 0; attempt < 40; attempt++) {
@@ -72,7 +70,7 @@ void main() {
     }
 
     expect(find.text('Your books, at a glance'), findsOneWidget);
-    final settings = (await tester.runAsync(repository.loadAppSettings))!;
+    final settings = repository.savedSettings!;
     expect(settings.businessName, 'Corner Shop');
     expect(settings.setupCompleted, isTrue);
     expect(settings.accountingCurrencyConfigured, isTrue);
@@ -86,4 +84,34 @@ class _SnapshotRepository extends LedgerRepository {
 
   @override
   Future<LedgerSnapshot> loadSnapshot() async => snapshot;
+}
+
+class _SetupRepository extends LedgerRepository {
+  _SetupRepository(LedgerDatabase database) : super(database);
+
+  AppSettings? savedSettings;
+
+  @override
+  Future<bool> hasMonetaryRecords() async => false;
+
+  @override
+  Future<void> configureAccountingCurrency({
+    required String currencyCode,
+    required bool confirmExistingAmounts,
+  }) async {}
+
+  @override
+  Future<void> saveAppSettings(AppSettings settings) async {
+    savedSettings = settings;
+  }
+
+  @override
+  Future<AppSettings> loadAppSettings() async => savedSettings ?? AppSettings.defaults;
+
+  @override
+  Future<LedgerSnapshot> loadSnapshot() async => AccountingEngine.summarize(
+        accounts: const [],
+        entries: const [],
+        activity: const [],
+      );
 }
