@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../data/ledger_repository.dart';
 import '../domain/app_settings.dart';
+import 'first_run_setup_page.dart';
 import 'ledger_home_page.dart';
 
 class LedgerApp extends StatefulWidget {
@@ -37,8 +38,23 @@ class _LedgerAppState extends State<LedgerApp> {
   }
 
   Future<void> _saveSettings(AppSettings settings) async {
-    setState(() => _settings = settings);
     await widget.repository.saveAppSettings(settings);
+    if (mounted) setState(() => _settings = settings);
+  }
+
+  Future<void> _completeFirstRun(
+    AppSettings settings, {
+    required bool confirmExistingAmounts,
+  }) async {
+    await widget.repository.configureAccountingCurrency(
+      currencyCode: settings.currencyCode,
+      confirmExistingAmounts: confirmExistingAmounts,
+    );
+    final completed = settings.copyWith(
+      accountingCurrencyConfigured: true,
+      setupCompleted: true,
+    );
+    await _saveSettings(completed);
   }
 
   @override
@@ -127,12 +143,18 @@ class _LedgerAppState extends State<LedgerApp> {
           ),
         ),
       ),
-      home: LedgerHomePage(
-        repository: widget.repository,
-        settings: _settings,
-        onSettingsChanged: _saveSettings,
-        visualScenario: widget.visualScenario,
-      ),
+      home: _settings.setupCompleted
+          ? LedgerHomePage(
+              repository: widget.repository,
+              settings: _settings,
+              onSettingsChanged: _saveSettings,
+              visualScenario: widget.visualScenario,
+            )
+          : FirstRunSetupPage(
+              repository: widget.repository,
+              initialSettings: _settings,
+              onComplete: _completeFirstRun,
+            ),
     );
   }
 }

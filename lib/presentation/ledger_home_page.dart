@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'navigation_presentation.dart';
@@ -30,6 +31,7 @@ import '../services/update_service.dart';
 import 'app_strings.dart';
 import 'widgets/searchable_select.dart';
 import 'pos_page.dart';
+import 'more_tools_page.dart';
 
 IconData _productIconData(String key) => switch (key) {
       'shopping_bag' => Icons.shopping_bag_outlined,
@@ -129,6 +131,9 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         _selectedIndex = 7;
         _settingsSectionIndex = 4;
         break;
+      case 'more-tools':
+        _selectedIndex = 9;
+        break;
       default:
         break;
     }
@@ -196,7 +201,10 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
       _updateCheckFailed = false;
     });
     try {
-      final update = await _updateService.checkForUpdate(currentVersion: appVersion);
+      final update = await _updateService.checkForUpdate(
+        currentVersion: appVersion,
+        android: io.Platform.isAndroid,
+      );
       if (!mounted) return;
       setState(() {
         _availableUpdate = update;
@@ -223,6 +231,15 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   Future<void> _downloadAndInstallUpdate() async {
     final update = _availableUpdate;
     if (update == null || _downloadingUpdate) return;
+    if (io.Platform.isAndroid) {
+      try {
+        final opened = await _updateService.openAndroidUpdate(update);
+        if (mounted) _notify(tr(context, opened ? 'androidUpdateOpened' : 'androidUpdateOpenFailed'));
+      } on Object {
+        if (mounted) _notify(tr(context, 'androidUpdateOpenFailed'));
+      }
+      return;
+    }
     setState(() => _downloadingUpdate = true);
     try {
       final installer = await _updateService.downloadAndVerify(update);
@@ -729,20 +746,15 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                         textDirection: TextDirection.ltr,
                         children: [
                           const SizedBox(width: 14),
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFE0F2EE),
-                              borderRadius: BorderRadius.circular(10),
+                          Flexible(
+                            child: Text(
+                              widget.settings.businessName.trim().isEmpty
+                                  ? tr(context, 'appName')
+                                  : widget.settings.businessName.trim(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.3),
                             ),
-                            child: const Icon(Icons.account_balance_wallet_rounded,
-                                color: Color(0xFF087E78), size: 18),
-                          ),
-                          const SizedBox(width: 9),
-                          Text(
-                            tr(context, 'appName'),
-                            style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.3),
                           ),
                           const Spacer(),
                         ],
@@ -767,8 +779,17 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                             color: Color(0xFF087E78), size: 19),
                       ),
                       const SizedBox(width: 11),
-                      Text(tr(context, 'appName'),
-                          style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.4)),
+                      Flexible(
+                        child: Text(
+                          tr(context, 'appName') +
+                              (widget.settings.businessName.trim().isEmpty
+                                  ? ''
+                                  : ' · ${widget.settings.businessName.trim()}'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.4),
+                        ),
+                      ),
                     ],
                   ),
                   actions: [
@@ -1466,6 +1487,40 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
               onSubmitted: (_) => _saveBusinessName(),
             ),
             const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: const {'retail', 'wholesale', 'cafe', 'services', 'workshop', 'other'}
+                      .contains(widget.settings.businessType)
+                  ? widget.settings.businessType
+                  : 'retail',
+              decoration: InputDecoration(labelText: tr(context, 'setupBusinessType')),
+              items: [
+                for (final type in ['retail', 'wholesale', 'cafe', 'services', 'workshop', 'other'])
+                  DropdownMenuItem(value: type, child: Text(tr(context, 'setupType_$type'))),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  unawaited(widget.onSettingsChanged(widget.settings.copyWith(businessType: value)));
+                }
+              },
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: const {'IR', 'AE', 'TR', 'DE', 'GB', 'US', 'OTHER'}
+                      .contains(widget.settings.countryCode)
+                  ? widget.settings.countryCode
+                  : 'OTHER',
+              decoration: InputDecoration(labelText: tr(context, 'setupCountry')),
+              items: [
+                for (final country in ['IR', 'AE', 'TR', 'DE', 'GB', 'US', 'OTHER'])
+                  DropdownMenuItem(value: country, child: Text(tr(context, 'setupCountry_$country'))),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  unawaited(widget.onSettingsChanged(widget.settings.copyWith(countryCode: value)));
+                }
+              },
+            ),
+            const SizedBox(height: 12),
             Align(
               alignment: AlignmentDirectional.centerEnd,
               child: FilledButton.icon(
@@ -1552,6 +1607,30 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
               },
               autoOpen: widget.visualScenario == 'currency-popup',
             ),
+            const SizedBox(height: 16),
+            SearchableSelect<String>(
+              id: 'settings-market-display-currency',
+              label: tr(context, 'marketDisplayCurrency'),
+              searchHint: tr(context, 'searchCurrencies'),
+              emptyLabel: tr(context, 'noSearchResults'),
+              value: widget.settings.marketDisplayCurrencyCode,
+              options: const [
+                SearchableSelectOption(value: 'TOMAN', label: 'TOMAN · Iranian toman'),
+                SearchableSelectOption(value: 'IRR', label: 'IRR · Iranian rial'),
+                SearchableSelectOption(value: 'USD', label: 'USD · US Dollar'),
+                SearchableSelectOption(value: 'EUR', label: 'EUR · Euro'),
+                SearchableSelectOption(value: 'AED', label: 'AED · UAE dirham'),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  unawaited(widget.onSettingsChanged(
+                    widget.settings.copyWith(marketDisplayCurrencyCode: value),
+                  ));
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+            Text(tr(context, 'marketDisplayCurrencyHint'), style: Theme.of(context).textTheme.bodySmall),
           ],
         );
       case 5:
@@ -1705,7 +1784,9 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                     icon: _downloadingUpdate
                         ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Icon(Icons.download_rounded),
-                    label: Text(_downloadingUpdate ? tr(context, 'verifyingUpdate') : tr(context, 'downloadAndInstall')),
+                    label: Text(_downloadingUpdate
+                        ? tr(context, 'verifyingUpdate')
+                        : tr(context, io.Platform.isAndroid ? 'downloadAndroidUpdate' : 'downloadAndInstall')),
                   ),
               ],
             ),
@@ -1725,38 +1806,12 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
         onImported: _reload,
       );
 
-  Widget _more(LedgerSnapshot snapshot) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(tr(context, 'moreTitle'), style: _pageTitle),
-          const SizedBox(height: 6),
-          Text(tr(context, 'chooseFeature'), style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              for (final index in [2, 3, 5, 6, 7])
-                SizedBox(
-                  width: 190,
-                  child: Card(
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(18),
-                      onTap: () => setState(() => _selectedIndex = index),
-                      child: Padding(
-                        padding: const EdgeInsets.all(18),
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Icon(_destinations[index].$2, color: Theme.of(context).colorScheme.primary),
-                          const SizedBox(height: 12),
-                          Text(tr(context, _destinations[index].$1), style: const TextStyle(fontWeight: FontWeight.w800)),
-                        ]),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ],
+  Widget _more(LedgerSnapshot snapshot) => MoreToolsPage(
+        marketDisplayCurrency: widget.settings.marketDisplayCurrencyCode,
+        onMarketDisplayCurrencyChanged: (currencyCode) => widget.onSettingsChanged(
+          widget.settings.copyWith(marketDisplayCurrencyCode: currencyCode),
+        ),
+        onOpenSmartImport: () => setState(() => _selectedIndex = 6),
       );
 
   Widget _overview(LedgerSnapshot snapshot, double availableWidth) {
@@ -1775,10 +1830,10 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
             child: ListTile(
               leading: const Icon(Icons.system_update_alt_rounded),
               title: Text(tr(context, 'updateAvailable') + ' v' + _availableUpdate!.version),
-              subtitle: Text(tr(context, 'updateVerified')),
+              subtitle: Text(tr(context, io.Platform.isAndroid ? 'androidUpdateInfo' : 'updateVerified')),
               trailing: FilledButton(
                 onPressed: _downloadAndInstallUpdate,
-                child: Text(tr(context, 'installUpdate')),
+                child: Text(tr(context, io.Platform.isAndroid ? 'downloadAndroidUpdate' : 'installUpdate')),
               ),
             ),
           ),
@@ -2359,7 +2414,17 @@ class _ProductDialogState extends State<_ProductDialog> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _barcode,
-                  decoration: InputDecoration(labelText: tr(context, 'productBarcode')),
+                  decoration: InputDecoration(
+                    labelText: tr(context, 'productBarcode'),
+                    suffixIcon: io.Platform.isAndroid
+                        ? IconButton(
+                            key: const Key('product-barcode-scan'),
+                            tooltip: tr(context, 'scanBarcode'),
+                            onPressed: _scanBarcode,
+                            icon: const Icon(Icons.qr_code_scanner_rounded),
+                          )
+                        : null,
+                  ),
                   validator: (value) => value != null && value.trim().contains(RegExp(r'\s'))
                       ? tr(context, 'barcodeNoWhitespace')
                       : null,
@@ -2582,6 +2647,72 @@ class _ProductDialogState extends State<_ProductDialog> {
         setState(() => _imageError = tr(context, 'productImageReadFailed'));
       }
     }
+  }
+
+  Future<void> _scanBarcode() async {
+    var accepted = false;
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(tr(dialogContext, 'scanBarcode')),
+        content: SizedBox(
+          width: 300,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(tr(dialogContext, 'barcodeScanHint'), textAlign: TextAlign.center),
+              const SizedBox(height: 14),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: SizedBox(
+                  width: 264,
+                  height: 214,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      MobileScanner(
+                        onDetect: (capture) {
+                          if (accepted) return;
+                          final value = capture.barcodes
+                              .map((barcode) => barcode.rawValue?.trim() ?? '')
+                              .firstWhere((barcode) => barcode.isNotEmpty, orElse: () => '');
+                          if (value.isEmpty) return;
+                          accepted = true;
+                          Navigator.of(dialogContext).pop(value);
+                        },
+                      ),
+                      IgnorePointer(
+                        child: Center(
+                          child: Container(
+                            width: 204,
+                            height: 104,
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.white, width: 3),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(tr(dialogContext, 'cancel')),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || result == null || result.isEmpty) return;
+    setState(() => _barcode.text = result);
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(content: Text(tr(context, 'barcodeReadSuccess'))),
+    );
   }
 
   void _removeImage() {

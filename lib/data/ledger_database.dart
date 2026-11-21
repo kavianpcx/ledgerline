@@ -9,7 +9,7 @@ class LedgerDatabase {
   Database get handle => _database;
 
   static Future<LedgerDatabase> open(String path) async {
-    final database = await databaseFactoryFfi.openDatabase(
+    final database = await databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
         version: 11,

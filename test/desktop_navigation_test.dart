@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:ledgerline/presentation/navigation_presentation.dart';
+import 'package:ledgerline/presentation/more_tools_page.dart';
 import 'package:ledgerline/presentation/widgets/desktop_sidebar.dart';
 
 const _destinations = <LedgerNavDestination>[
@@ -183,5 +184,24 @@ void main() {
     await tester.tap(find.byKey(const Key('desktop-navigation-search-result-3')));
     await tester.pumpAndSettle();
     expect(selected, [3]);
+  });
+
+  testWidgets('More tools lists utilities instead of repeating accounting pages', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: MoreToolsPage(
+          marketDisplayCurrency: 'TOMAN',
+          onMarketDisplayCurrencyChanged: (_) async {},
+          onOpenSmartImport: () {},
+        ),
+      ),
+    ));
+
+    expect(find.byKey(const Key('more-tool-calculator')), findsOneWidget);
+    expect(find.byKey(const Key('more-tool-currency')), findsOneWidget);
+    expect(find.byKey(const Key('more-tool-smart-import')), findsOneWidget);
+    expect(find.text('Accounts'), findsNothing);
+    expect(find.text('Products'), findsNothing);
+    expect(find.text('Reports'), findsNothing);
   });
 }

@@ -10,6 +10,9 @@ void main() {
       expect(UpdateService.isVersionNewer('0.2.0+2', '0.2.0+1'), isFalse);
       expect(UpdateService.isVersionNewer('0.1.9', '0.2.0'), isFalse);
       expect(UpdateService.isVersionNewer('preview', '0.1.0'), isFalse);
+      expect(UpdateService.isVersionNewer('0.6.0-beta.2', '0.6.0-beta.1'), isTrue);
+      expect(UpdateService.isVersionNewer('0.6.0', '0.6.0-beta.1'), isTrue);
+      expect(UpdateService.isVersionNewer('0.6.0-beta.1', '0.6.0'), isFalse);
     });
 
     test('calculates SHA-256 for installer bytes', () {
