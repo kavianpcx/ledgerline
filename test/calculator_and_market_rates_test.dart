@@ -41,12 +41,14 @@ void main() {
     });
 
     test('ignores unsupported quote units and rejects empty feeds', () {
-      final snapshot = MarketRatesSnapshot.fromJson({
-        'items': [
-          {'id': 'usd', 'unit': 'USD', 'price': 1.0, 'updated_utc': '2026-11-20T10:00:00Z'},
-        ],
-      });
-      expect(snapshot.quotes, isEmpty);
+      expect(
+        () => MarketRatesSnapshot.fromJson({
+          'items': [
+            {'id': 'usd', 'unit': 'USD', 'price': 1.0, 'updated_utc': '2026-11-20T10:00:00Z'},
+          ],
+        }),
+        throwsFormatException,
+      );
       expect(() => MarketRatesSnapshot.fromJson({'items': []}), throwsFormatException);
     });
   });
