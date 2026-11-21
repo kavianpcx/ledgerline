@@ -14,6 +14,8 @@ The product requirements are in [docs/PRODUCT_SPECIFICATION.md](docs/PRODUCT_SPE
 - Windows installer updates with SHA-256 checking. Android update downloads open through Android so installation remains under the user's approval.
 - English and Persian layouts, local storage, light/dark themes, and a MIT license.
 
+![Ledgerline More Tools screen](https://github.com/kavianpcx/ledgerline/releases/download/v0.6.0-beta.1/more-tools.png)
+
 Smart Import currently supports reviewed CSV/XLSX product catalogs and offline image-to-text OCR. OCR does not classify documents or automatically create accounting records. PowerPoint, DOCX, and structured PDF import are not supported yet.
 
 ## Download
