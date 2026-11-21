@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -9,7 +9,6 @@ import 'package:sqflite/sqflite.dart' as mobile_sqlite;
 
 import 'data/ledger_database.dart';
 import 'data/ledger_repository.dart';
-import 'domain/app_settings.dart';
 import 'presentation/ledger_app.dart';
 
 Future<void> main() async {
