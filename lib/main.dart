@@ -39,7 +39,7 @@ Future<void> main() async {
   final visualScenario = const String.fromEnvironment('LEDGERLINE_VISUAL_SCENARIO');
   runApp(_LedgerStartup(visualScenario: visualScenario));
   if (desktopWindow != null) {
-    WidgetsBinding.instance.addPostFrameCallback((_) => desktopWindow!.show());
+    await desktopWindow.show();
   }
 }
 
