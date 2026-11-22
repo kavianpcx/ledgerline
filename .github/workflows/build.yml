@@ -236,8 +236,6 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Windows debug build failed for scenario $scenario." }
             $applicationPath = Join-Path $PWD 'build/windows/x64/runner/Debug/ledgerline.exe'
             if (-not (Test-Path -LiteralPath $applicationPath)) { throw 'Debug application executable was not produced.' }
-            $startupLogPath = Join-Path ([System.IO.Path]::GetTempPath()) 'ledgerline-startup.log'
-            if (Test-Path -LiteralPath $startupLogPath) { Remove-Item -LiteralPath $startupLogPath -Force }
             $process = Start-Process -FilePath $applicationPath -PassThru
             for ($attempt = 0; $attempt -lt 30; $attempt++) {
               Start-Sleep -Seconds 1
@@ -326,13 +324,6 @@ jobs:
             if (-not $uiRendered) {
               $diagnosticPath = Join-Path $evidenceDirectory ($scenario + '-diagnostic.png')
               $bitmap.Save($diagnosticPath, [System.Drawing.Imaging.ImageFormat]::Png)
-              if (Test-Path -LiteralPath $startupLogPath) {
-                Copy-Item -LiteralPath $startupLogPath -Destination (Join-Path $evidenceDirectory ($scenario + '-startup.log')) -Force
-                Write-Host 'Ledgerline startup trace:'
-                Get-Content -LiteralPath $startupLogPath | ForEach-Object { Write-Host $_ }
-              } else {
-                Write-Host 'Ledgerline startup trace file was not created.'
-              }
               Write-Host "Rendered-color check found $($colors.Count) distinct colors for $scenario. Diagnostic screenshot: $diagnosticPath"
               $graphics.Dispose()
               $bitmap.Dispose()

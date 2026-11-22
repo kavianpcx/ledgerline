@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui' show PlatformDispatcher;
 
 import 'package:material_ui/material_ui.dart';
 import 'package:window_manager/window_manager.dart';
@@ -12,30 +11,8 @@ import 'data/ledger_database.dart';
 import 'data/ledger_repository.dart';
 import 'presentation/ledger_app.dart';
 
-void _traceStartup(String stage) {
-  try {
-    File(p.join(Directory.systemTemp.path, 'ledgerline-startup.log'))
-        .writeAsStringSync('$stage\n', mode: FileMode.append, flush: true);
-  } on Object {
-    // Startup diagnostics must never prevent the application from opening.
-  }
-}
-
 Future<void> main() async {
-  _traceStartup('main entered');
   WidgetsFlutterBinding.ensureInitialized();
-  FlutterError.onError = (details) {
-    _traceStartup('Flutter error: ${details.exceptionAsString()}');
-    final stackLines = details.stack?.toString().split('\n').take(8).join('\n');
-    if (stackLines != null && stackLines.isNotEmpty) _traceStartup(stackLines);
-    FlutterError.presentError(details);
-  };
-  PlatformDispatcher.instance.onError = (error, stack) {
-    _traceStartup('Platform error: $error');
-    _traceStartup(stack.toString().split('\n').take(8).join('\n'));
-    return false;
-  };
-  _traceStartup('Flutter binding initialized');
   if (Platform.isWindows || Platform.isLinux) {
     ffi.sqfliteFfiInit();
     ffi.databaseFactory = ffi.databaseFactoryFfi;
@@ -61,11 +38,8 @@ Future<void> main() async {
 
   final visualScenario = const String.fromEnvironment('LEDGERLINE_VISUAL_SCENARIO');
   runApp(_LedgerStartup(visualScenario: visualScenario));
-  _traceStartup('runApp returned');
-  WidgetsBinding.instance.addPostFrameCallback((_) => _traceStartup('first Flutter frame completed'));
   if (desktopWindow != null) {
     desktopWindow.show();
-    _traceStartup('desktop window show invoked');
   }
 }
 
@@ -85,25 +59,20 @@ class _LedgerStartupState extends State<_LedgerStartup> {
   @override
   void initState() {
     super.initState();
-    _traceStartup('startup widget initialized');
     _initialize();
   }
 
   Future<void> _initialize() async {
     try {
-      _traceStartup('loading application support directory');
       final appSupport = await getApplicationSupportDirectory();
       final databaseDirectory = Directory(p.join(appSupport.path, 'ledgerline'));
       await databaseDirectory.create(recursive: true);
-      _traceStartup('opening local database');
       final database = await LedgerDatabase.open(
         p.join(databaseDirectory.path, 'ledgerline.sqlite'),
       );
       final repository = LedgerRepository(database);
       await repository.initialize();
-      _traceStartup('local database initialized');
       final settings = await repository.loadAppSettings();
-      _traceStartup('settings loaded');
       if (!mounted) return;
       setState(() {
         _application = LedgerApp(
@@ -115,7 +84,6 @@ class _LedgerStartupState extends State<_LedgerStartup> {
         );
       });
     } catch (error) {
-      _traceStartup('startup failed: ${error.runtimeType}');
       if (mounted) setState(() => _error = error);
     }
   }
@@ -123,10 +91,8 @@ class _LedgerStartupState extends State<_LedgerStartup> {
   @override
   Widget build(BuildContext context) {
     if (_application case final app?) {
-      _traceStartup('LedgerApp replacement build');
       return app;
     }
-    _traceStartup('startup progress screen build');
     return MaterialApp(
       title: 'Ledgerline',
       debugShowCheckedModeBanner: false,
