@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:material_ui/material_ui.dart';
 import 'package:window_manager/window_manager.dart';
@@ -23,6 +24,14 @@ void _traceStartup(String stage) {
 Future<void> main() async {
   _traceStartup('main entered');
   WidgetsFlutterBinding.ensureInitialized();
+  FlutterError.onError = (details) {
+    _traceStartup('Flutter error: ${details.exception.runtimeType}');
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    _traceStartup('Platform error: ${error.runtimeType}');
+    return false;
+  };
   _traceStartup('Flutter binding initialized');
   if (Platform.isWindows || Platform.isLinux) {
     ffi.sqfliteFfiInit();
@@ -50,6 +59,7 @@ Future<void> main() async {
   final visualScenario = const String.fromEnvironment('LEDGERLINE_VISUAL_SCENARIO');
   runApp(_LedgerStartup(visualScenario: visualScenario));
   _traceStartup('runApp returned');
+  WidgetsBinding.instance.addPostFrameCallback((_) => _traceStartup('first Flutter frame completed'));
   if (desktopWindow != null) {
     desktopWindow.show();
     _traceStartup('desktop window show invoked');
@@ -109,7 +119,11 @@ class _LedgerStartupState extends State<_LedgerStartup> {
 
   @override
   Widget build(BuildContext context) {
-    if (_application case final app?) return app;
+    if (_application case final app?) {
+      _traceStartup('LedgerApp replacement build');
+      return app;
+    }
+    _traceStartup('startup progress screen build');
     return MaterialApp(
       title: 'Ledgerline',
       debugShowCheckedModeBanner: false,
