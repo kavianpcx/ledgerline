@@ -301,7 +301,7 @@ jobs:
               throw "Could not inspect the Ledgerline window for $scenario."
             }
             $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-            $uiRendered = $false
+            # Require distinct client-area pixels so a blank Flutter window fails CI.\n            $uiRendered = $false
             for ($attempt = 0; $attempt -lt 20; $attempt++) {
               $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
               $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
