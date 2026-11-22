@@ -25,11 +25,14 @@ Future<void> main() async {
   _traceStartup('main entered');
   WidgetsFlutterBinding.ensureInitialized();
   FlutterError.onError = (details) {
-    _traceStartup('Flutter error: ${details.exception.runtimeType}');
+    _traceStartup('Flutter error: ${details.exceptionAsString()}');
+    final stackLines = details.stack?.toString().split('\n').take(8).join('\n');
+    if (stackLines != null && stackLines.isNotEmpty) _traceStartup(stackLines);
     FlutterError.presentError(details);
   };
   PlatformDispatcher.instance.onError = (error, stack) {
-    _traceStartup('Platform error: ${error.runtimeType}');
+    _traceStartup('Platform error: $error');
+    _traceStartup(stack.toString().split('\n').take(8).join('\n'));
     return false;
   };
   _traceStartup('Flutter binding initialized');
