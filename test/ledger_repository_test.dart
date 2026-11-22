@@ -1038,6 +1038,11 @@ void main() {
       currencyCode: 'EUR',
       marketDisplayCurrencyCode: 'AED',
       setupCompleted: true,
+      securityLockEnabled: true,
+      securityPromptSeen: true,
+      securitySalt: 'test-salt',
+      securityHash: 'test-verifier',
+      biometricUnlockEnabled: true,
     ));
     final settings = await repository.loadAppSettings();
 
@@ -1049,6 +1054,11 @@ void main() {
     expect(settings.currencyCode, 'EUR');
     expect(settings.marketDisplayCurrencyCode, 'AED');
     expect(settings.setupCompleted, isTrue);
+    expect(settings.securityLockEnabled, isTrue);
+    expect(settings.securityPromptSeen, isTrue);
+    expect(settings.securitySalt, 'test-salt');
+    expect(settings.securityHash, 'test-verifier');
+    expect(settings.biometricUnlockEnabled, isTrue);
   });
 
   test('exports a consistent SQLite backup', () async {

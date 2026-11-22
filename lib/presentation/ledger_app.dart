@@ -1,9 +1,13 @@
+import 'dart:io';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../data/ledger_repository.dart';
 import '../domain/app_settings.dart';
 import 'first_run_setup_page.dart';
 import 'ledger_home_page.dart';
+import 'security_lock_page.dart';
+import '../services/security_service.dart';
 
 class LedgerApp extends StatefulWidget {
   const LedgerApp({
@@ -21,19 +25,39 @@ class LedgerApp extends StatefulWidget {
   State<LedgerApp> createState() => _LedgerAppState();
 }
 
-class _LedgerAppState extends State<LedgerApp> {
+class _LedgerAppState extends State<LedgerApp> with WidgetsBindingObserver {
   late AppSettings _settings;
+  late bool _unlocked;
+  final _securityService = SecurityService();
 
   @override
   void initState() {
     super.initState();
     _settings = widget.initialSettings;
+    _unlocked = !widget.initialSettings.securityLockEnabled;
+    WidgetsBinding.instance.addObserver(this);
     if (widget.visualScenario == 'settings-light') {
       _settings = _settings.copyWith(darkMode: false);
     } else if (widget.visualScenario == 'settings-dark') {
       _settings = _settings.copyWith(darkMode: true);
     } else if (widget.visualScenario == 'settings-fa') {
       _settings = _settings.copyWith(languageCode: 'fa', darkMode: false);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (Platform.isAndroid &&
+        (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) &&
+        _settings.securityLockEnabled &&
+        _unlocked) {
+      setState(() => _unlocked = false);
     }
   }
 
@@ -54,6 +78,7 @@ class _LedgerAppState extends State<LedgerApp> {
       accountingCurrencyConfigured: true,
       setupCompleted: true,
     );
+    _unlocked = true;
     await _saveSettings(completed);
   }
 
@@ -143,18 +168,24 @@ class _LedgerAppState extends State<LedgerApp> {
           ),
         ),
       ),
-      home: _settings.setupCompleted
-          ? LedgerHomePage(
-              repository: widget.repository,
-              settings: _settings,
-              onSettingsChanged: _saveSettings,
-              visualScenario: widget.visualScenario,
-            )
-          : FirstRunSetupPage(
+      home: !_settings.setupCompleted
+          ? FirstRunSetupPage(
               repository: widget.repository,
               initialSettings: _settings,
               onComplete: _completeFirstRun,
-            ),
+            )
+          : _settings.securityLockEnabled && !_unlocked
+              ? SecurityLockPage(
+                  settings: _settings,
+                  securityService: _securityService,
+                  onUnlocked: () => setState(() => _unlocked = true),
+                )
+              : LedgerHomePage(
+                  repository: widget.repository,
+                  settings: _settings,
+                  onSettingsChanged: _saveSettings,
+                  visualScenario: widget.visualScenario,
+                )
     );
   }
 }

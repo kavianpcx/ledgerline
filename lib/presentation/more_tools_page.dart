@@ -1,3 +1,6 @@
+import 'dart:math';
+
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -116,7 +119,9 @@ class _ToolPageShell extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          child,
+          Expanded(
+            child: SingleChildScrollView(child: child),
+          ),
         ],
       );
 }
@@ -173,20 +178,99 @@ class _CalculatorToolState extends State<_CalculatorTool> {
   String _expression = '';
   String? _error;
   bool _justEvaluated = false;
+  double _memory = 0;
+  bool _memorySet = false;
+  bool _memoryHasValue = false;
 
+  static const _memoryKeys = ['MC', 'MR', 'M+', 'M−', 'MS'];
   static const _keys = <List<String>>[
-    ['C', '(', ')', '⌫'],
-    ['7', '8', '9', '÷'],
-    ['4', '5', '6', '×'],
-    ['1', '2', '3', '−'],
-    ['0', '.', '%', '+'],
-    ['='],
+    ['%', 'CE', 'C', '⌫'],
+    ['1/x', 'x²', '√x', '÷'],
+    ['7', '8', '9', '×'],
+    ['4', '5', '6', '−'],
+    ['1', '2', '3', '+'],
+    ['+/−', '0', '.', '='],
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_handleKeyboard);
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKeyboard);
+    super.dispose();
+  }
+
+  bool _handleKeyboard(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape) {
+      _press('C');
+      return true;
+    }
+    if (key == LogicalKeyboardKey.backspace) {
+      _press('⌫');
+      return true;
+    }
+    if (key == LogicalKeyboardKey.delete) {
+      _press('CE');
+      return true;
+    }
+    if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
+      _press('=');
+      return true;
+    }
+    final numpad = <LogicalKeyboardKey, String>{
+      LogicalKeyboardKey.numpadAdd: '+',
+      LogicalKeyboardKey.numpadSubtract: '−',
+      LogicalKeyboardKey.numpadMultiply: '×',
+      LogicalKeyboardKey.numpadDivide: '÷',
+      LogicalKeyboardKey.numpadDecimal: '.',
+      LogicalKeyboardKey.numpad0: '0',
+      LogicalKeyboardKey.numpad1: '1',
+      LogicalKeyboardKey.numpad2: '2',
+      LogicalKeyboardKey.numpad3: '3',
+      LogicalKeyboardKey.numpad4: '4',
+      LogicalKeyboardKey.numpad5: '5',
+      LogicalKeyboardKey.numpad6: '6',
+      LogicalKeyboardKey.numpad7: '7',
+      LogicalKeyboardKey.numpad8: '8',
+      LogicalKeyboardKey.numpad9: '9',
+    };
+    final label = numpad[key] ?? event.character ?? '';
+    const allowed = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', ',', '+', '-', '*', '/', '%', '(', ')'};
+    if (allowed.contains(label)) {
+      _press(switch (label) {
+        ',' => '.',
+        '-' => '−',
+        '*' => '×',
+        '/' => '÷',
+        _ => label,
+      });
+      return true;
+    }
+    return false;
+  }
+
   void _press(String key) {
+    if (_memoryKeys.contains(key)) {
+      _pressMemory(key);
+      return;
+    }
     if (key == 'C') {
       setState(() {
         _expression = '';
+        _error = null;
+        _justEvaluated = false;
+      });
+      return;
+    }
+    if (key == 'CE') {
+      setState(() {
+        _expression = _expression.replaceFirst(RegExp(r'\d*\.?\d*$'), '');
         _error = null;
         _justEvaluated = false;
       });
@@ -201,6 +285,7 @@ class _CalculatorToolState extends State<_CalculatorTool> {
       return;
     }
     if (key == '=') {
+      if (_expression.trim().isEmpty) return;
       try {
         final result = Calculator.format(Calculator.evaluate(_expression));
         setState(() {
@@ -216,12 +301,73 @@ class _CalculatorToolState extends State<_CalculatorTool> {
       return;
     }
 
+    if (key == '+/−' || key == '1/x' || key == 'x²' || key == '√x') {
+      final value = _preview;
+      if (value == null) return;
+      final parsed = double.tryParse(value);
+      if (parsed == null || (key == '√x' && parsed < 0) || (key == '1/x' && parsed == 0)) {
+        setState(() => _error = tr(context, 'calculatorInvalidExpression'));
+        return;
+      }
+      final transformed = switch (key) {
+        '+/−' => -parsed,
+        '1/x' => 1 / parsed,
+        'x²' => parsed * parsed,
+        '√x' => sqrt(parsed),
+        _ => parsed,
+      };
+      setState(() {
+        _expression = Calculator.format(transformed);
+        _error = null;
+        _justEvaluated = true;
+      });
+      return;
+    }
+
     final operator = const {'+', '−', '×', '÷', '%', ')'};
     setState(() {
       if (_justEvaluated && !operator.contains(key)) _expression = '';
       _expression += key == '−' ? '-' : key;
       _error = null;
       _justEvaluated = false;
+    });
+  }
+
+  void _pressMemory(String key) {
+    final current = double.tryParse(_preview ?? '');
+    setState(() {
+      switch (key) {
+        case 'MC':
+          _memory = 0;
+          _memorySet = false;
+          break;
+        case 'MR':
+          if (_memorySet) {
+            _expression = Calculator.format(_memory);
+            _justEvaluated = true;
+            _error = null;
+          }
+          break;
+        case 'MS':
+          if (current != null && current.isFinite) {
+            _memory = current;
+            _memorySet = true;
+          }
+          break;
+        case 'M+':
+          if (current != null && current.isFinite) {
+            _memory += current;
+            _memorySet = true;
+          }
+          break;
+        case 'M−':
+          if (current != null && current.isFinite) {
+            _memory -= current;
+            _memorySet = true;
+          }
+          break;
+      }
+      _memoryHasValue = _memorySet;
     });
   }
 
@@ -240,37 +386,63 @@ class _CalculatorToolState extends State<_CalculatorTool> {
     final preview = _preview;
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.all(20),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Row(
+              children: [
+                Expanded(child: Text(tr(context, 'calculatorStandard'), style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700))),
+                if (_memoryHasValue) Text('M', style: TextStyle(color: colors.primary, fontWeight: FontWeight.w800)),
+              ],
+            ),
+            const SizedBox(height: 8),
             Container(
               width: double.infinity,
-              constraints: const BoxConstraints(minHeight: 96),
-              padding: const EdgeInsets.all(16),
+              constraints: const BoxConstraints(minHeight: 126),
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
               decoration: BoxDecoration(
                 color: Theme.of(context).inputDecorationTheme.fillColor,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: colors.outlineVariant),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(_expression.isEmpty ? '0' : _expression,
-                      key: const Key('calculator-expression'),
+                  Text(_expression.isEmpty ? '' : _expression,
+                    key: const Key('calculator-expression'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.end,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant)),
+                  const SizedBox(height: 8),
+                  if (_error != null)
+                    Text(tr(context, 'calculatorInvalidExpression'), style: TextStyle(color: colors.error))
+                  else
+                    Text(preview ?? (_expression.isEmpty ? '0' : _expression),
+                      key: const Key('calculator-result'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.end,
-                      style: Theme.of(context).textTheme.headlineSmall),
-                  if (_error != null) ...[
-                    const SizedBox(height: 4),
-                    Text(tr(context, 'calculatorInvalidExpression'), style: TextStyle(color: colors.error)),
-                  ] else if (preview != null) ...[
-                    const SizedBox(height: 4),
-                    Text('= $preview', key: const Key('calculator-result'),
-                        style: TextStyle(color: colors.primary, fontSize: 17, fontWeight: FontWeight.w700)),
-                  ],
+                      style: Theme.of(context).textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w400)),
                 ],
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                for (final key in _memoryKeys)
+                  Expanded(
+                    child: TextButton(
+                      key: Key('calculator-key-$key'),
+                      onPressed: key == 'MC' || key == 'MR' ? (_memorySet ? () => _press(key) : null) : () => _press(key),
+                      child: Text(key, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
             for (final row in _keys)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -278,26 +450,36 @@ class _CalculatorToolState extends State<_CalculatorTool> {
                   children: [
                     for (final key in row)
                       Expanded(
-                        flex: key == '=' && row.length == 1 ? 4 : 1,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 4),
                           child: SizedBox(
-                            height: 54,
-                            child: FilledButton.tonal(
-                              key: Key('calculator-key-$key'),
-                              onPressed: () => _press(key),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: key == '=' ? colors.primary : null,
-                                foregroundColor: key == '=' ? colors.onPrimary : null,
-                              ),
-                              child: Text(key, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                            ),
+                            height: 58,
+                            child: key == '='
+                                ? FilledButton(
+                                    key: Key('calculator-key-$key'),
+                                    onPressed: () => _press(key),
+                                    child: Text(key, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                                  )
+                                : FilledButton.tonal(
+                                    key: Key('calculator-key-$key'),
+                                    onPressed: () => _press(key),
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: const {'%', 'CE', 'C', '⌫', '1/x', 'x²', '√x', '÷', '×', '−', '+'}.contains(key)
+                                          ? colors.surfaceContainerHighest
+                                          : null,
+                                    ),
+                                    child: Text(key, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                                  ),
                           ),
                         ),
                       ),
                   ],
                 ),
               ),
+            const SizedBox(height: 3),
+            Text(tr(context, 'calculatorKeyboardHint'),
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant)),
           ],
         ),
       ),
@@ -651,10 +833,14 @@ class _RateCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                    child: Text(quote.code.substring(0, 1), style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w800)),
+                  Tooltip(
+                    message: _currencyName(context, quote.code),
+                    child: CircleAvatar(
+                      key: Key('currency-flag-${quote.code}'),
+                      radius: 18,
+                      backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                      child: Text(_currencyFlag(quote.code), style: const TextStyle(fontSize: 22)),
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(child: Text(_currencyName(context, quote.code), style: const TextStyle(fontWeight: FontWeight.w800))),
@@ -689,6 +875,17 @@ String _currencyName(BuildContext context, String code) => switch (code) {
       'CNY' => tr(context, 'currencyCny'),
       'TRY' => tr(context, 'currencyTry'),
       _ => code,
+    };
+
+String _currencyFlag(String code) => switch (code) {
+      'USD' => '🇺🇸',
+      'EUR' => '🇪🇺',
+      'GBP' => '🇬🇧',
+      'AED' => '🇦🇪',
+      'CNY' => '🇨🇳',
+      'TRY' => '🇹🇷',
+      'IRR' || 'TOMAN' => '🇮🇷',
+      _ => '💱',
     };
 
 String _formatQuoteTime(BuildContext context, DateTime? time, bool persian) {

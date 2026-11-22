@@ -1,7 +1,11 @@
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../data/ledger_repository.dart';
 import '../domain/app_settings.dart';
+import '../services/security_service.dart';
 import 'app_strings.dart';
 
 class FirstRunSetupPage extends StatefulWidget {
@@ -34,7 +38,13 @@ class _FirstRunSetupPageState extends State<FirstRunSetupPage> {
   bool _hasLegacyRecords = false;
   bool _confirmedLegacyCurrency = false;
   bool _saving = false;
+  bool _enablePasscode = false;
+  bool _useBiometrics = false;
+  bool _biometricsAvailable = false;
   String? _error;
+  final _passcodeController = TextEditingController();
+  final _passcodeConfirmationController = TextEditingController();
+  final _securityService = SecurityService();
 
   static const _businessTypes = <String>[
     'retail',
@@ -78,12 +88,20 @@ class _FirstRunSetupPageState extends State<FirstRunSetupPage> {
         ? widget.initialSettings.currencyCode
         : 'USD';
     _languageCode = widget.initialSettings.languageCode;
+    if (Platform.isAndroid) _loadBiometricAvailability();
     _checkLegacyRecords();
+  }
+
+  Future<void> _loadBiometricAvailability() async {
+    final available = await _securityService.canUseBiometrics();
+    if (mounted) setState(() => _biometricsAvailable = available);
   }
 
   @override
   void dispose() {
     _businessName.dispose();
+    _passcodeController.dispose();
+    _passcodeConfirmationController.dispose();
     super.dispose();
   }
 
@@ -123,12 +141,26 @@ class _FirstRunSetupPageState extends State<FirstRunSetupPage> {
       setState(() => _error = tr(context, 'setupConfirmLegacyCurrency'));
       return;
     }
+    if (_enablePasscode) {
+      final passcode = _passcodeController.text;
+      if (SecurityService.validatePasscode(passcode) != null) {
+        setState(() => _error = tr(context, 'securityPasscodeLength'));
+        return;
+      }
+      if (passcode != _passcodeConfirmationController.text) {
+        setState(() => _error = tr(context, 'securityPasscodesMismatch'));
+        return;
+      }
+    }
 
     setState(() {
       _saving = true;
       _error = null;
     });
     try {
+      final credentials = _enablePasscode
+          ? await _securityService.createPasscode(_passcodeController.text)
+          : null;
       await widget.onComplete(
         widget.initialSettings.copyWith(
           businessName: name,
@@ -138,6 +170,11 @@ class _FirstRunSetupPageState extends State<FirstRunSetupPage> {
           languageCode: _languageCode,
           accountingCurrencyConfigured: true,
           setupCompleted: true,
+          securityPromptSeen: true,
+          securityLockEnabled: _enablePasscode,
+          securitySalt: credentials?.salt ?? '',
+          securityHash: credentials?.hash ?? '',
+          biometricUnlockEnabled: _enablePasscode && _useBiometrics && _biometricsAvailable,
         ),
         confirmExistingAmounts: _confirmedLegacyCurrency,
       );
@@ -276,6 +313,48 @@ class _FirstRunSetupPageState extends State<FirstRunSetupPage> {
                                 icon: const Icon(Icons.refresh_rounded),
                                 label: Text(tr(context, 'retry')),
                               ),
+                            ),
+                        ],
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          key: const Key('setup-security-passcode'),
+                          contentPadding: EdgeInsets.zero,
+                          value: _enablePasscode,
+                          title: Text(tr(context, 'securityEnablePasscode')),
+                          subtitle: Text(tr(context, 'securityFirstRunHint')),
+                          onChanged: (value) => setState(() {
+                            _enablePasscode = value;
+                            if (!value) _useBiometrics = false;
+                            _error = null;
+                          }),
+                        ),
+                        if (_enablePasscode) ...[
+                          const SizedBox(height: 8),
+                          TextField(
+                            key: const Key('setup-security-passcode-entry'),
+                            controller: _passcodeController,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                            obscureText: true,
+                            decoration: InputDecoration(labelText: tr(context, 'securityPasscode')),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            key: const Key('setup-security-passcode-confirm'),
+                            controller: _passcodeConfirmationController,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                            obscureText: true,
+                            decoration: InputDecoration(labelText: tr(context, 'securityConfirmPasscode')),
+                          ),
+                          if (_biometricsAvailable)
+                            SwitchListTile(
+                              key: const Key('setup-security-biometrics'),
+                              contentPadding: EdgeInsets.zero,
+                              value: _useBiometrics,
+                              title: Text(tr(context, 'securityBiometrics')),
+                              subtitle: Text(tr(context, 'securityBiometricsHint')),
+                              onChanged: (value) => setState(() => _useBiometrics = value),
                             ),
                         ],
                         const SizedBox(height: 18),

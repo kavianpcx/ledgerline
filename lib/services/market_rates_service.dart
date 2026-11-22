@@ -133,7 +133,7 @@ class MarketRatesService {
       final request = await client.getUrl(Uri.parse(uri)).timeout(const Duration(seconds: 12));
       request.followRedirects = false;
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      request.headers.set(HttpHeaders.userAgentHeader, 'Ledgerline/0.6');
+      request.headers.set(HttpHeaders.userAgentHeader, 'Ledgerline/0.7');
       final response = await request.close().timeout(const Duration(seconds: 12));
       if (response.statusCode < 200 || response.statusCode >= 300) {
         await response.drain<void>();

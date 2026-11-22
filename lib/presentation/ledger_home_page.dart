@@ -28,6 +28,7 @@ import '../domain/sales_invoice.dart';
 import '../services/offline_ocr_service.dart';
 import '../services/invoice_print_service.dart';
 import '../services/update_service.dart';
+import '../services/security_service.dart';
 import 'app_strings.dart';
 import 'widgets/searchable_select.dart';
 import 'pos_page.dart';
@@ -79,6 +80,11 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   late Future<LedgerSnapshot> _snapshot;
   late final TextEditingController _businessNameController;
   late final TextEditingController _taxRateController;
+  late final TextEditingController _securityPasscodeController;
+  late final TextEditingController _securityPasscodeConfirmationController;
+  final _securityService = SecurityService();
+  bool _securityBusy = false;
+  bool _changingPasscode = false;
   late final UpdateService _updateService;
   bool _checkingUpdates = false;
   bool _downloadingUpdate = false;
@@ -139,6 +145,8 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     }
     _snapshot = widget.repository.loadSnapshot();
     _businessNameController = TextEditingController(text: widget.settings.businessName);
+    _securityPasscodeController = TextEditingController();
+    _securityPasscodeConfirmationController = TextEditingController();
     _taxRateController = TextEditingController(
       text: _formatTaxRate(widget.settings.defaultTaxRateBasisPoints),
     );
@@ -156,6 +164,8 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     _businessNameController.dispose();
+    _securityPasscodeController.dispose();
+    _securityPasscodeConfirmationController.dispose();
     _taxRateController.dispose();
     _productSearchDebounce?.cancel();
     _productSearchController.removeListener(_onProductSearchChanged);
@@ -740,26 +750,14 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
                     color: Theme.of(context).scaffoldBackgroundColor,
                     child: WindowCaption(
                       brightness: Theme.of(context).brightness,
-                      title: SizedBox(
-                      height: 56,
-                      child: Row(
-                        textDirection: TextDirection.ltr,
-                        children: [
-                          const SizedBox(width: 14),
-                          Flexible(
-                            child: Text(
-                              widget.settings.businessName.trim().isEmpty
-                                  ? tr(context, 'appName')
-                                  : widget.settings.businessName.trim(),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.3),
-                            ),
-                          ),
-                          const Spacer(),
-                        ],
+                      title: Text(
+                        widget.settings.businessName.trim().isEmpty
+                            ? tr(context, 'appName')
+                            : widget.settings.businessName.trim(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.3),
                       ),
-                    ),
                   ),
                 ),
               )
@@ -1357,6 +1355,116 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
     );
   }
 
+  Future<void> _saveAppPasscode() async {
+    final passcode = _securityPasscodeController.text;
+    if (SecurityService.validatePasscode(passcode) != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr(context, 'securityPasscodeLength'))),
+      );
+      return;
+    }
+    if (passcode != _securityPasscodeConfirmationController.text) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr(context, 'securityPasscodesMismatch'))),
+      );
+      return;
+    }
+    setState(() => _securityBusy = true);
+    try {
+      final credentials = await _securityService.createPasscode(passcode);
+      await widget.onSettingsChanged(widget.settings.copyWith(
+        securityLockEnabled: true,
+        securityPromptSeen: true,
+        securitySalt: credentials.salt,
+        securityHash: credentials.hash,
+        biometricUnlockEnabled: widget.settings.securityLockEnabled && widget.settings.biometricUnlockEnabled,
+      ));
+      _securityPasscodeController.clear();
+      _securityPasscodeConfirmationController.clear();
+      if (mounted) setState(() => _changingPasscode = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(tr(context, 'securityPasscodeSaved'))),
+        );
+      }
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(tr(context, 'securitySaveFailed'))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _securityBusy = false);
+    }
+  }
+
+  Future<void> _setBiometricUnlock(bool enabled) async {
+    setState(() => _securityBusy = true);
+    try {
+      if (enabled) {
+        if (!await _securityService.canUseBiometrics()) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(tr(context, 'securityBiometricsUnavailable'))),
+            );
+          }
+          return;
+        }
+        if (!await _securityService.authenticateBiometrics(
+          localizedReason: tr(context, 'securityBiometricPrompt'),
+        )) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(tr(context, 'securityBiometricFailed'))),
+            );
+          }
+          return;
+        }
+      }
+      await widget.onSettingsChanged(widget.settings.copyWith(biometricUnlockEnabled: enabled));
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(tr(context, 'securitySaveFailed'))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _securityBusy = false);
+    }
+  }
+
+  Future<void> _disableAppLock() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr(context, 'securityDisableTitle')),
+        content: Text(tr(context, 'securityDisableBody')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr(context, 'cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr(context, 'securityDisablePasscode'))),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _securityBusy = true);
+    try {
+      await widget.onSettingsChanged(widget.settings.copyWith(
+        securityLockEnabled: false,
+        securitySalt: '',
+        securityHash: '',
+        biometricUnlockEnabled: false,
+      ));
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(tr(context, 'securitySaveFailed'))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _securityBusy = false);
+    }
+  }
+
   Widget _settingsPage(LedgerSnapshot snapshot) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1401,6 +1509,7 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
       ('smartImport', Icons.document_scanner_outlined),
       ('backup', Icons.backup_outlined),
       ('updates', Icons.system_update_alt_rounded),
+      ('security', Icons.lock_outline_rounded),
     ];
     if (wide) {
       return Card(
@@ -1792,6 +1901,117 @@ class _LedgerHomePageState extends State<LedgerHomePage> {
             ),
             const SizedBox(height: 10),
             Text(tr(context, 'updateInfo'), style: Theme.of(context).textTheme.bodySmall),
+          ],
+        );
+      case 11:
+        return _settingsCard(
+          title: tr(context, 'security'),
+          subtitle: tr(context, 'securitySettingsHint'),
+          children: [
+            if (widget.settings.securityLockEnabled) ...[
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.verified_user_outlined),
+                title: Text(tr(context, 'securityPasscodeEnabled')),
+                subtitle: Text(tr(context, 'securityPasscodeHint')),
+              ),
+              if (io.Platform.isAndroid) ...[
+                SwitchListTile(
+                  key: const Key('security-settings-biometrics'),
+                  contentPadding: EdgeInsets.zero,
+                  value: widget.settings.biometricUnlockEnabled,
+                  title: Text(tr(context, 'securityBiometrics')),
+                  subtitle: Text(tr(context, 'securityBiometricsHint')),
+                  onChanged: _securityBusy ? null : _setBiometricUnlock,
+                ),
+                const SizedBox(height: 8),
+              ],
+              OutlinedButton.icon(
+                key: const Key('security-change-passcode'),
+                onPressed: _securityBusy
+                    ? null
+                    : () => setState(() {
+                          _changingPasscode = !_changingPasscode;
+                          if (!_changingPasscode) {
+                            _securityPasscodeController.clear();
+                            _securityPasscodeConfirmationController.clear();
+                          }
+                        }),
+                icon: const Icon(Icons.password_rounded),
+                label: Text(tr(context, 'securityChangePasscode')),
+              ),
+              if (_changingPasscode) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  key: const Key('security-settings-passcode'),
+                  controller: _securityPasscodeController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  obscureText: true,
+                  maxLength: SecurityService.maximumPasscodeLength,
+                  decoration: InputDecoration(labelText: tr(context, 'securityPasscode'), counterText: ''),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  key: const Key('security-settings-confirm'),
+                  controller: _securityPasscodeConfirmationController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  obscureText: true,
+                  maxLength: SecurityService.maximumPasscodeLength,
+                  decoration: InputDecoration(labelText: tr(context, 'securityConfirmPasscode'), counterText: ''),
+                ),
+                const SizedBox(height: 10),
+                FilledButton.icon(
+                  key: const Key('security-save-passcode'),
+                  onPressed: _securityBusy ? null : _saveAppPasscode,
+                  icon: _securityBusy
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.save_outlined),
+                  label: Text(tr(context, 'securityChangePasscode')),
+                ),
+                const SizedBox(height: 10),
+              ],
+              OutlinedButton.icon(
+                key: const Key('security-disable-lock'),
+                onPressed: _securityBusy ? null : _disableAppLock,
+                icon: const Icon(Icons.lock_open_rounded),
+                label: Text(tr(context, 'securityDisablePasscode')),
+              ),
+              const SizedBox(height: 12),
+              Text(tr(context, 'securityLocalOnlyNotice'), style: Theme.of(context).textTheme.bodySmall),
+            ] else ...[
+              TextField(
+                key: const Key('security-settings-passcode'),
+                controller: _securityPasscodeController,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                obscureText: true,
+                maxLength: SecurityService.maximumPasscodeLength,
+                decoration: InputDecoration(labelText: tr(context, 'securityPasscode'), counterText: ''),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                key: const Key('security-settings-confirm'),
+                controller: _securityPasscodeConfirmationController,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                obscureText: true,
+                maxLength: SecurityService.maximumPasscodeLength,
+                decoration: InputDecoration(labelText: tr(context, 'securityConfirmPasscode'), counterText: ''),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.icon(
+                key: const Key('security-save-passcode'),
+                onPressed: _securityBusy ? null : _saveAppPasscode,
+                icon: _securityBusy
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.lock_outline_rounded),
+                label: Text(tr(context, 'securityEnablePasscode')),
+              ),
+              const SizedBox(height: 12),
+              Text(tr(context, 'securityLocalOnlyNotice'), style: Theme.of(context).textTheme.bodySmall),
+            ],
           ],
         );
       default:
